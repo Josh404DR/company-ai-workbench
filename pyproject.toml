@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "company-ai-workbench"
+version = "0.1.0"
+description = "Reliable, local-first company AI workbench engine"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+company-workbench = "company_workbench.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
