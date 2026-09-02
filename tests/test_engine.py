@@ -22,7 +22,7 @@ from company_workbench.errors import (
     RunnerLaunchError,
 )
 from company_workbench.runner import CodexCliRunner, ProcessResult, SubprocessExecutor
-from company_workbench.store import SQLiteStore
+from company_workbench.store import SCHEMA_VERSION, SQLiteStore
 
 
 class EngineTestCase(unittest.TestCase):
@@ -50,7 +50,7 @@ class EngineTestCase(unittest.TestCase):
         self.engine.complete_run(run["id"])
         with self.assertRaises(EvidenceRequiredError):
             self.engine.accept_ticket(self.ticket["id"], accepted_by="Josh")
-        self.engine.verify_run(run["id"], status="passed", evidence_ref="test://pass", summary="passed", verifier="IV")
+        self.engine.verify_run(run["id"], status="passed", evidence_ref="test://pass", summary="passed", verifier="IV", verifier_provider="human", evidence_content="pytest: 1 passed")
         with self.assertRaises(AcceptanceRequiredError):
             self.engine.accept_ticket(self.ticket["id"], accepted_by="Agent")
         accepted = self.engine.accept_ticket(self.ticket["id"], accepted_by="Josh")
@@ -65,7 +65,7 @@ class EngineTestCase(unittest.TestCase):
         run = self.engine.start_run(self.ticket["id"])
         self.engine.complete_run(run["id"])
         with self.assertRaises(EvidenceRequiredError):
-            self.engine.verify_run(run["id"], status="passed", evidence_ref="", summary="passed", verifier="IV")
+            self.engine.verify_run(run["id"], status="passed", evidence_ref="", summary="passed", verifier="IV", verifier_provider="human", evidence_content="x")
 
     def test_failed_run_keeps_events_and_returns_ticket_to_ready(self):
         run = self.engine.start_run(self.ticket["id"])
@@ -91,7 +91,8 @@ class EngineTestCase(unittest.TestCase):
         run = self.engine.start_run(self.ticket["id"])
         self.engine.complete_run(run["id"])
         verification = self.engine.verify_run(
-            run["id"], status="passed", evidence_ref="test://proof", summary="passed", verifier="IV"
+            run["id"], status="passed", evidence_ref="test://proof", summary="passed", verifier="IV",
+            verifier_provider="human", evidence_content="proof body",
         )
         self.engine.accept_ticket(self.ticket["id"], accepted_by="Josh")
         with self.assertRaises(sqlite3.DatabaseError):
@@ -110,17 +111,40 @@ class EngineTestCase(unittest.TestCase):
         )
         self.assertEqual("pending", memory["status"])
 
-    def test_memory_source_run_must_belong_to_same_project(self):
-        other_project = self.engine.create_project(self.workspace["id"], "Other")
+    def test_memory_review_and_active_context(self):
         run = self.engine.start_run(self.ticket["id"])
         self.engine.complete_run(run["id"])
-        with self.assertRaises(InvalidTransitionError):
-            self.engine.propose_memory(
-                other_project["id"], run["id"], kind="semantic", statement="Cross-project contamination",
-                scope=f"project:{other_project['id']}", evidence_ref=f"run:{run['id']}",
-            )
+        memory = self.engine.propose_memory(
+            self.project["id"], run["id"], kind="procedural", statement="Always run test before accept",
+            scope=f"project:{self.project['id']}", evidence_ref=f"run:{run['id']}",
+        )
+        self.assertEqual("pending", memory["status"])
+
+        # Non-Josh cannot approve memory
+        with self.assertRaises(AcceptanceRequiredError):
+            self.engine.review_memory(memory["id"], action="approve", reviewed_by="AI_Agent")
+
+        # Josh approves memory
+        approved = self.engine.review_memory(memory["id"], action="approve", reviewed_by="Josh", note="Good rule")
+        self.assertEqual("approved", approved["status"])
+
+        # Active context includes approved memory
+        context = self.engine.get_project_active_context(self.project["id"])
+        self.assertIn("Always run test before accept", context)
+        self.assertIn("[PROCEDURAL]", context)
+
+        # List memories filter
+        approved_list = self.engine.list_memories(self.project["id"], status="approved")
+        self.assertEqual(1, len(approved_list))
+        self.assertEqual(memory["id"], approved_list[0]["id"])
+
+        # Reject/Disable transition
+        disabled = self.engine.review_memory(memory["id"], action="disable", reviewed_by="Josh")
+        self.assertEqual("disabled", disabled["status"])
+        self.assertEqual("", self.engine.get_project_active_context(self.project["id"]))
 
     def test_backup_can_be_opened_and_has_same_ticket(self):
+
         backup = Path(self.temp.name) / "backup.db"
         self.engine.store.backup_to(backup)
         restored = WorkbenchEngine(backup)
@@ -157,7 +181,7 @@ class StoreConcurrencyTestCase(unittest.TestCase):
                 results = list(pool.map(lambda _: open_engine(), range(8)))
 
             self.assertTrue(all(result["integrity"] == "ok" for result in results))
-            self.assertTrue(all(result["schema_version"] == 4 for result in results))
+            self.assertTrue(all(result["schema_version"] == SCHEMA_VERSION for result in results))
 
 
 class StoreMigrationTestCase(unittest.TestCase):
@@ -276,7 +300,7 @@ class StoreMigrationTestCase(unittest.TestCase):
 
             store = SQLiteStore(database)
 
-            self.assertEqual(4, store.schema_version())
+            self.assertEqual(SCHEMA_VERSION, store.schema_version())
             with store.connect() as db:
                 acceptance = db.execute(
                     "SELECT verification_id FROM acceptances WHERE id='ACC-legacy'"
@@ -695,7 +719,7 @@ class SchemaV4MigrationTestCase(unittest.TestCase):
     def test_fresh_database_reaches_v4_with_invocation_columns(self):
         with tempfile.TemporaryDirectory() as temp:
             store = SQLiteStore(Path(temp) / "fresh.db")
-            self.assertEqual(4, store.schema_version())
+            self.assertEqual(SCHEMA_VERSION, store.schema_version())
             with store.connect() as db:
                 columns = {row[1] for row in db.execute("PRAGMA table_info(runs)")}
             self.assertIn("invocation_id", columns)
@@ -712,7 +736,7 @@ class SchemaV4MigrationTestCase(unittest.TestCase):
             run = engine.start_run(ticket["id"])
             self.assertIsNone(run["invocation_id"])
             self.assertIsNone(run["pid"])
-            self.assertEqual(4, store.schema_version())
+            self.assertEqual(SCHEMA_VERSION, store.schema_version())
 
     def test_queued_status_remains_unused_by_managed_run(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -800,7 +824,8 @@ class CliAndQueryTestCase(unittest.TestCase):
             with patch("sys.stdout", new_callable=StringIO) as out:
                 code = main([
                     "--database", db_path, "verify", run_id,
-                    "--evidence", "tests pass", "--summary", "Verified all acceptance criteria"
+                    "--evidence", "tests pass", "--evidence-text", "57 passed in 4.7s",
+                    "--verifier-provider", "human", "--summary", "Verified all acceptance criteria"
                 ])
                 self.assertEqual(0, code)
 

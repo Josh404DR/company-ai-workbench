@@ -77,7 +77,8 @@ class _GeminiInvocationHandle:
                     return ProcessResult(1, "", "No candidates returned by Gemini", pid=None)
                 parts = candidates[0].get("content", {}).get("parts", [])
                 text = "".join(part.get("text", "") for part in parts)
-                return ProcessResult(0, text, "", pid=None)
+                usage = resp_data.get("usageMetadata")
+                return ProcessResult(0, text, "", pid=None, usage=usage if isinstance(usage, dict) else None)
         except urllib.error.HTTPError as err:
             err_body = err.read().decode("utf-8", errors="replace")
             return ProcessResult(err.code, "", f"Gemini HTTP {err.code}: {err_body}", pid=None)

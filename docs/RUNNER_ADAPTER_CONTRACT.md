@@ -71,3 +71,15 @@ doubles and local Python sleeper subprocesses — never a real Codex process.
 - `_default_pid_alive_checker()` is a best-effort, read-only probe (`OpenProcess` with
   `PROCESS_QUERY_LIMITED_INFORMATION` on Windows, `os.kill(pid, 0)` elsewhere); it can return `None` when
   liveness cannot be determined, and its result must never be used to justify acting on the process.
+
+## Usage and worktree retirement (v0.3 builder-level, 2026-09-02)
+
+- `ProcessResult.usage` / `RunnerResult.usage`: optional `{input_tokens, output_tokens}`. `_classify()` accepts a
+  provider-shaped mapping (Gemini `usageMetadata`, OpenAI-style `usage`) or scans JSON/JSONL stdout for a `usage`
+  object (Codex `exec --json`). Missing usage stays `None`; the Engine persists NULL, never zero.
+- `start_managed_run(..., provider_account=, keep_worktree=)`: the account label is stored on the Run row only.
+- After the terminal transaction, an isolated worktree is retired: `commit_all()` onto `wb-run/<run>`, directory
+  removed unless `keep_worktree`, then a `worktree_retired` Event. A commit failure keeps the directory and records
+  `commit_error` so no work product is lost.
+- Automated verification evidence is the JSON of the verification result, hashed and stored; its
+  `verifier_provider` is `local-command`, which is independent of every model provider by construction.

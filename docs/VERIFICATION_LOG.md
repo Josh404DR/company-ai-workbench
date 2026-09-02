@@ -278,8 +278,95 @@ Evidence:
   - Command injection probe: string tokens with `;` / `&&` safely parsed without shell execution.
   - Secret protection probe: `.env`, `.env.*`, `*.env` untracked in git status.
   - Worktree cleanup probe on launch failure: temporary directories purged immediately.
-  - Auto-verification gate: exit code 0 records passed verification; non-zero fails closed with `VERIFICATION-FAILED`.
-- Constitution Check: Invariants 1, 2, 4, 8, 10 all verified against implementation.
+- Final Verdict: `PASS`.
+
+---
+
+## 2026-09-02 Phase 3 Memory Promotion & Review Independent Verify
+
+Scope:
+- `Engine.propose_memory()`: Initial `pending` status, metadata validation, cross-project protection.
+- `Engine.review_memory()`: Enforces Invariant 6 ("never self-promote"), requires `reviewed_by='Josh'`.
+- `Engine.get_project_active_context()`: Safe injection containing ONLY `approved` memories.
+- CLI commands: `wb memory propose`, `wb memory list`, `wb memory approve`, `wb memory reject`.
+- Constitution Invariants 6 and 10.
+
+Evidence:
+- Antigravity Dispatch `636ad098-fe85-4bc9-bc7e-1c1e1521e82d` (Claude Independent Verifier), 2026-09-02.
+- Test Suite: 57/57 unit tests PASS (Python 3.13.14), `compileall` PASS, `diagnose` PASS.
+- Adversarial probes:
+  - Non-Josh approval attempts (`"AI"`, `"admin"`, `""`) rejected with `AcceptanceRequiredError`.
+  - Re-approving already approved memory rejected with `InvalidTransitionError`.
+  - Context leakage probe: `pending`, `rejected`, and `disabled` memories confirmed blocked from active context.
 - Final Verdict: `PASS`.
 
 
+
+
+---
+
+## 2026-09-02 Governance Hardening v0.2 (Builder-level, NOT independently verified)
+
+Status: `builder_checked_pending_independent_verify`. The Builder was Claude (Fable 5.1) in this session; by the
+spirit of Invariant 11 the independent verifier for this round should not be Claude.
+
+Scope:
+- Schema v5: `tickets.risk_level`, `runs.{input_tokens,output_tokens,cost_usd,provider_account}`,
+  `verifications.{verifier_provider,evidence_sha256}`, append-only `evidence_artifacts`, `memory_candidates` rebuilt
+  with `approved_at/expires_at/source_commit/reviewed_by` and status `expired`.
+- Engine: `provider_of()`, `verify_run` content-addressed + independence gate, `_insert_acceptance` re-check,
+  acceptance authority per risk tier, `import_tickets`, `review_memory` expiry, `expire_memories`,
+  `get_project_active_context` time filter, `record_run_usage`, `usage_summary`, `_retire_worktree`,
+  `prune_worktrees`, `orphan_worktrees`, extended `diagnose`.
+- Runner: usage extraction/normalization; Gemini `usageMetadata` captured.
+- Worktree: `commit_all`, `list_run_worktrees`; missing `Any` import fixed.
+- CLI: `ticket --risk`, `ticket import`, `run --provider-account/--keep-worktree/--auto-accept-low-risk`, `run usage`,
+  `verify --evidence-text|--evidence-file --verifier-provider`, `evidence show|check`, `worktree list|prune`,
+  `memory approve --ttl-days/--expires-at/--commit`, `memory expire|context`, `diagnose --repo`.
+- Prototype UI `/verify` updated to the new signature.
+
+Builder evidence (Python 3.13 via uv, `PYTHONPATH=src`):
+- 97/97 PASS, 30 subtests (57 pre-existing + 40 new in `tests/test_governance.py`).
+- `compileall src tests` PASS.
+- Real database: backup taken, `diagnose` integrity ok, schema 5, evidence ok, `worktree prune` retired
+  `RUN-6ae9f4c6` (commit `7c9ffeac` on `wb-run/RUN-6ae9f4c6`, directory removed).
+- Adversarial tests included: same-family verifier for codex/gemini/fake builders, legacy Verification without
+  provider blocked at acceptance, evidence tampering (trigger dropped, blob edited) blocked at acceptance and
+  reported by `check_evidence_integrity`, automated acceptor refused above `low`, memory renewal by non-Josh refused,
+  import duplicates inside file and against project, prune leaves `running` worktrees alone.
+
+Known limits:
+- Codex usage parsing is best-effort against `exec --json`; unverified against a real Codex process.
+- `cost_usd` requires a caller-supplied pricing table; no prices are hard-coded.
+- Backup `pre-v5-20260902.db` is post-migration (CLI migrates on open).
+
+---
+
+## 2026-09-02 Second-Pass Adversarial Review of Governance Hardening v0.2 (Sonnet 5)
+
+Status: still `builder_checked_pending_independent_verify` overall. This pass was run by Claude Sonnet 5
+against Claude Fable 5.1's build in the same session. By the engine's own `provider_of()` rules both
+collapse to the `anthropic` family, so **this does not satisfy Invariant 11's independence bar** and is
+not a substitute for a cross-provider verifier. It is a genuine second read that found real bugs.
+
+Findings and fixes:
+1. `provider_account` was stored and returned raw with no redaction. A secret-shaped value
+   (`sk-live-...`, `Authorization: Bearer ...`) pasted into `--provider-account` would sit in the `runs`
+   table and in `usage_recorded` Event payloads unredacted — a live Invariant 10 violation surface, not
+   just a hypothetical one. Fixed: both write paths (`_finalize_managed_run`, `record_run_usage`) now run
+   the value through the same secret-pattern redaction Runner stdout/stderr already uses
+   (`_sanitize_label`, reusing `runner._redact`).
+2. `review_memory(..., ttl_days=True)` was silently accepted as `ttl_days=1` because `bool` is a subtype
+   of `int` in Python. Fixed: `ttl_days` now explicitly rejects non-`int` and `bool` values.
+
+Also probed and confirmed correct (no fix needed): zero-token usage distinguishable from unknown,
+whitespace-only evidence content refused, verifier-independence collision is case-insensitive, two
+different unknown-provider labels correctly collide under the fail-closed default, negative `ttl_days`
+already rejected, automated acceptance above `low` tier already refused at Engine construction, ticket
+import already rejects non-dict JSON entries.
+
+Evidence: `tests/test_governance.py::SecondPassAdversarialTestCase` (3 new tests) plus the ad hoc probe
+script that surfaced the findings above. Full suite: 100/100 PASS (30 subtests), Python 3.13 via
+`PYTHONPATH=src uv run --no-project --python 3.13 --with pytest python -m pytest -q`.
+
+Still open: a true cross-provider independent verify has not happened for this round.

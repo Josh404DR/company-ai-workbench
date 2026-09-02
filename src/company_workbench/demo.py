@@ -34,7 +34,8 @@ def run_demo(database_path: str | Path) -> dict:
     before_acceptance = engine.get_ticket(ticket["id"])["status"]
     verification = engine.verify_run(
         run["id"], status="passed", evidence_ref="test://tests:test_schema_rename_migration",
-        summary="回歸測試通過", verifier="demo-verifier",
+        summary="回歸測試通過", verifier="demo-verifier", verifier_provider="human",
+        evidence_content="tests/test_schema_rename_migration.py::test_rename PASSED",
     )
     accepted = engine.accept_ticket(ticket["id"], accepted_by="Josh", note="Demo acceptance")
     memory = engine.propose_memory(

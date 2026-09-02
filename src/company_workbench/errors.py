@@ -27,3 +27,13 @@ class RunnerLaunchError(WorkbenchError):
 class WorktreeError(WorkbenchError):
     code = "WB-500-WORKTREE"
 
+
+
+class VerifierIndependenceError(WorkbenchError):
+    """Verifier provider matches the builder provider (Invariant 11)."""
+
+    code = "WB-422-VERIFIER-INDEPENDENCE"
+
+
+class TicketImportError(WorkbenchError):
+    code = "WB-422-IMPORT"

@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from .errors import WorktreeError
 
@@ -100,6 +100,21 @@ class WorktreeEnvironment:
                 "passed": False,
             }
 
+    def commit_all(self, message: str) -> str | None:
+        """Commit every change in this worktree onto its Run branch so the work product survives
+        directory removal. Returns the commit SHA, or None when there was nothing to commit.
+        Uses an explicit local identity so it never depends on the machine's git config."""
+        _run_git(["add", "-A"], cwd=self.worktree_path)
+        status = _run_git(["status", "--porcelain"], cwd=self.worktree_path)
+        if not status.strip():
+            return None
+        _run_git(
+            ["-c", "user.name=company-workbench", "-c", "user.email=workbench@local",
+             "commit", "-q", "-m", message],
+            cwd=self.worktree_path,
+        )
+        return _run_git(["rev-parse", "HEAD"], cwd=self.worktree_path)
+
     def cleanup(self, *, force: bool = True) -> None:
         """Prune and remove the temporary worktree."""
         try:
@@ -129,6 +144,19 @@ class GitWorktreeManager:
             else self.repo_root / ".workbench" / "worktrees"
         )
         self.worktree_base.mkdir(parents=True, exist_ok=True)
+
+    def list_run_worktrees(self) -> list[WorktreeEnvironment]:
+        """Every Run worktree directory currently present under the managed base directory."""
+        found: list[WorktreeEnvironment] = []
+        if not self.worktree_base.exists():
+            return found
+        for path in sorted(self.worktree_base.iterdir()):
+            if path.is_dir() and path.name.startswith("RUN-"):
+                found.append(WorktreeEnvironment(
+                    run_id=path.name, branch_name=f"wb-run/{path.name}",
+                    worktree_path=path, repo_root=self.repo_root,
+                ))
+        return found
 
     def create_worktree(self, run_id: str, *, base_ref: str = "HEAD") -> WorktreeEnvironment:
         """Create an isolated worktree and branch for the specified run_id."""

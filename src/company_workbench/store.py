@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class SQLiteStore:
@@ -94,7 +94,82 @@ class SQLiteStore:
                 connection.execute(
                     "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (4, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
                 )
+            if 5 not in applied:
+                self._apply_v5(connection)
+                connection.execute(
+                    "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (5, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+                )
             connection.commit()
+
+    @staticmethod
+    def _apply_v5(connection: sqlite3.Connection) -> None:
+        """Governance hardening: risk tiers, verifier independence, content-addressed evidence,
+        run usage/cost, and memory expiry. Every addition is nullable or defaulted so v1-v4 rows
+        survive unchanged; the only rebuild is memory_candidates, which needs a wider status CHECK.
+
+        Defaults fail closed: legacy tickets become risk_level='high' (Josh-only acceptance), legacy
+        verifications keep NULL verifier_provider/evidence_sha256 and therefore can no longer back a
+        NEW acceptance, and legacy approved memories keep NULL expires_at (never expire) but carry no
+        approved_at, which the active-context report surfaces as "unknown age".
+        """
+        ticket_columns = {row[1] for row in connection.execute("PRAGMA table_info(tickets)")}
+        if ticket_columns and "risk_level" not in ticket_columns:
+            connection.execute(
+                "ALTER TABLE tickets ADD COLUMN risk_level TEXT NOT NULL DEFAULT 'high' "
+                "CHECK(risk_level IN ('low','medium','high'))"
+            )
+        run_columns = {row[1] for row in connection.execute("PRAGMA table_info(runs)")}
+        for name, decl in (
+            ("input_tokens", "INTEGER"), ("output_tokens", "INTEGER"),
+            ("cost_usd", "REAL"), ("provider_account", "TEXT"),
+        ):
+            if run_columns and name not in run_columns:
+                connection.execute(f"ALTER TABLE runs ADD COLUMN {name} {decl}")
+        verification_columns = {row[1] for row in connection.execute("PRAGMA table_info(verifications)")}
+        for name in ("verifier_provider", "evidence_sha256"):
+            if verification_columns and name not in verification_columns:
+                connection.execute(f"ALTER TABLE verifications ADD COLUMN {name} TEXT")
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS evidence_artifacts (
+                sha256 TEXT PRIMARY KEY,
+                content BLOB NOT NULL,
+                byte_size INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TRIGGER IF NOT EXISTS evidence_artifacts_no_update BEFORE UPDATE ON evidence_artifacts
+            BEGIN SELECT RAISE(ABORT, 'evidence artifacts are append-only'); END;
+            CREATE TRIGGER IF NOT EXISTS evidence_artifacts_no_delete BEFORE DELETE ON evidence_artifacts
+            BEGIN SELECT RAISE(ABORT, 'evidence artifacts are append-only'); END;
+            """
+        )
+        memory_columns = {row[1] for row in connection.execute("PRAGMA table_info(memory_candidates)")}
+        if memory_columns and "expires_at" not in memory_columns:
+            connection.executescript(
+                """
+                CREATE TABLE memory_candidates_v5 (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id),
+                    source_run_id TEXT NOT NULL REFERENCES runs(id),
+                    kind TEXT NOT NULL CHECK(kind IN ('episodic','semantic','procedural','preference','project')),
+                    statement TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    evidence_ref TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','disabled','expired')),
+                    created_at TEXT NOT NULL,
+                    approved_at TEXT,
+                    expires_at TEXT,
+                    source_commit TEXT,
+                    reviewed_by TEXT
+                );
+                INSERT INTO memory_candidates_v5
+                    (id,project_id,source_run_id,kind,statement,scope,evidence_ref,status,created_at)
+                SELECT id,project_id,source_run_id,kind,statement,scope,evidence_ref,status,created_at
+                FROM memory_candidates;
+                DROP TABLE memory_candidates;
+                ALTER TABLE memory_candidates_v5 RENAME TO memory_candidates;
+                """
+            )
 
     @staticmethod
     def _apply_v4(connection: sqlite3.Connection) -> None:

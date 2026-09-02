@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import tempfile
@@ -29,6 +30,7 @@ class ProcessResult:
     timed_out: bool = False
     cancelled: bool = False
     pid: int | None = None
+    usage: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,7 @@ class RunnerResult:
     stderr: str
     exit_code: int | None
     pid: int | None
+    usage: dict | None = None
 
 
 class ProcessExecutor(Protocol):
@@ -239,7 +242,52 @@ def _classify(result: ProcessResult, max_output_chars: int, sensitive_values: Se
         outcome, error = "failed", "RUNNER-INVALID-OUTPUT"
     else:
         outcome, error = "completed", None
-    return RunnerResult(outcome, error, stdout, stderr, result.exit_code, result.pid)
+    usage = _normalize_usage(result.usage) or _extract_usage(result.stdout)
+    return RunnerResult(outcome, error, stdout, stderr, result.exit_code, result.pid, usage)
+
+
+def _extract_usage(stdout: str) -> dict | None:
+    """Best-effort token usage from JSON/JSONL runner output (e.g. Codex `exec --json`).
+
+    Scans each line and any top-level JSON object for a `usage` mapping carrying
+    input/output token counts; the last one wins. Never raises: usage is diagnostic
+    evidence, not a gate.
+    """
+    found: dict | None = None
+    candidates: list[str] = stdout.splitlines()
+    if stdout.strip().startswith("{"):
+        candidates.append(stdout)
+    for line in candidates:
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        usage = obj.get("usage") if isinstance(obj, dict) else None
+        if isinstance(usage, dict):
+            normalized = _normalize_usage(usage)
+            if normalized:
+                found = normalized
+    return found
+
+
+def _normalize_usage(usage: dict | None) -> dict | None:
+    if not isinstance(usage, dict):
+        return None
+    aliases = {
+        "input_tokens": ("input_tokens", "prompt_tokens", "promptTokenCount"),
+        "output_tokens": ("output_tokens", "completion_tokens", "candidatesTokenCount"),
+    }
+    out: dict = {}
+    for key, names in aliases.items():
+        for name in names:
+            value = usage.get(name)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                out[key] = int(value)
+                break
+    return out or None
 
 
 def _redact(value: str, sensitive_values: Sequence[str] = ()) -> str:

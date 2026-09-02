@@ -266,7 +266,10 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 run_id = get_val("run_id")
                 evidence = get_val("evidence")
                 summary = get_val("summary")
-                engine.verify_run(run_id, status="passed", evidence_ref=evidence, summary=summary, verifier="Josh")
+                engine.verify_run(
+                    run_id, status="passed", evidence_ref=evidence[:80] or "ui-evidence", summary=summary,
+                    verifier="Josh", verifier_provider="human", evidence_content=evidence,
+                )
                 msg = f"Run #{run_id} 驗證紀錄已鎖定保存"
 
             elif parsed.path == "/accept":
