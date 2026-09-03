@@ -21,6 +21,12 @@
 - Next action:
   - Independent verification of governance v2.0 by a non-Claude reviewer (the Sonnet 5 second-pass review does not count -- `provider_of()` collapses every Claude model onto the same `anthropic` family, so it fails the same test this engine enforces on everyone else).
   - Continue dogfooding: this is real usage but still far short of "two weeks" -- keep routing real work through `wb ticket create/import` -> `wb run start` -> `wb verify` -> `wb accept` before expanding Runners or building delivery adapters.
+  - **A real Codex-managed Run is the single biggest untested item** -- `start_managed_run()` has never been exercised against a real Codex process, only `FakeExecutor`/local-Python-sleeper test doubles. This is the actual core value proposition and should be prioritized as soon as quota allows.
   - Not yet pushed to a GitHub remote (unlike the sibling `ai-copy-engine` extraction, which is at `github.com/sayaJosh/ai-copy-engine`, private) -- no instruction to push this one yet.
-- Source boundary: `ticket-coding-station` was not modified.
-- Remaining boundary: real Codex CLI execution (upstream quota until 9/22), PySide6 GUI, PR/merge/deploy adapters.
+- Source boundary: `ticket-coding-station` was not modified (read-only lookup on 2026-09-03 for real Codex/Claude/Antigravity CLI invocation patterns already used by that project -- see below).
+- Codex CLI reality check (2026-09-03, corrects a stale claim below that said "upstream quota until 9/22" -- that date was wrong/outdated):
+  - `codex` CLI is installed on this machine (`codex-cli 0.152.1`) and logged in via ChatGPT (`codex login status` -> "Logged in using ChatGPT"). It is not blocked by auth.
+  - A real `codex exec --dangerously-bypass-approvals-and-sandbox --json "..."` probe (isolated scratch dir, no repo files touched) returned a genuine usage-limit error, not a login/auth failure: `"You've hit your usage limit... try again at 4:11 PM."` -- i.e. today (2026-09-03), a few hours out, not 9/22.
+  - `ticket-coding-station/server/src/task-manager.js` (read-only reference, not modified) confirms the exact real invocation shape this project's own `CodexCliRunner` already matches: `codex exec --dangerously-bypass-approvals-and-sandbox -` reading the prompt from stdin, plus a `codex login status` preflight check. It also documents the Antigravity CLI invocation (`agy --print --dangerously-skip-permissions` / `agy --prompt-interactive ... --dangerously-skip-permissions`, with a version-pin guard against `$env:AGY_EXPECTED_VERSION`) in case a future Runner adapter for it is wanted -- not built here, just confirmed the pattern exists as prior art.
+  - Action: once the daily quota resets, run one real `start_managed_run()` against the real Codex CLI (still isolated via `--worktree`, still a low-stakes prompt) to finally close this gap.
+- Remaining boundary: PySide6 GUI, PR/merge/deploy adapters.
