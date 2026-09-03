@@ -214,6 +214,40 @@ class EvidenceIntegrityTestCase(GovernanceBase):
         self.assertTrue(self.engine.check_evidence_integrity()["ok"])
 
 
+class MemoryReviewAuthorityTestCase(GovernanceBase):
+    # Regression: review_memory() used to hardcode `if reviewed_by != "Josh"` directly, while
+    # accept_ticket() went through the configurable acceptance_authority -- inconsistent for no
+    # reason, since Invariant 6 only requires "never self-promote", not "must be Josh forever".
+    def propose(self, engine, run_id):
+        return engine.propose_memory(
+            self.project["id"], run_id, kind="procedural", statement="s", scope="p", evidence_ref="e",
+        )
+
+    def test_default_requires_josh(self):
+        _, run = self.completed_run()
+        memory = self.propose(self.engine, run["id"])
+        with self.assertRaises(AcceptanceRequiredError):
+            self.engine.review_memory(memory["id"], action="approve", reviewed_by="someone-else")
+        self.assertEqual("approved", self.engine.review_memory(memory["id"], action="approve", reviewed_by="Josh")["status"])
+
+    def test_custom_authority_is_honored(self):
+        engine = WorkbenchEngine(self.database, memory_review_authority=("Josh", "lead-editor"))
+        _, run = self.completed_run(engine=engine)
+        memory = self.propose(engine, run["id"])
+        with self.assertRaises(AcceptanceRequiredError):
+            engine.review_memory(memory["id"], action="approve", reviewed_by="random-agent")
+        approved = engine.review_memory(memory["id"], action="approve", reviewed_by="lead-editor")
+        self.assertEqual("lead-editor", approved["reviewed_by"])
+
+    def test_empty_authority_is_rejected_at_construction(self):
+        with self.assertRaises(ValueError):
+            WorkbenchEngine(self.database, memory_review_authority=())
+
+    def test_diagnose_reports_memory_review_authority(self):
+        engine = WorkbenchEngine(self.database, memory_review_authority=("Josh", "lead-editor"))
+        self.assertEqual(["Josh", "lead-editor"], engine.diagnose()["memory_review_authority"])
+
+
 class MemoryExpiryTestCase(GovernanceBase):
     def propose(self, run_id):
         return self.engine.propose_memory(

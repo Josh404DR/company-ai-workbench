@@ -50,6 +50,9 @@ DEFAULT_ACCEPTANCE_AUTHORITY: dict[str, tuple[str, ...]] = {
 TIERED_ACCEPTANCE_AUTHORITY: dict[str, tuple[str, ...]] = {
     "low": ("Josh", AUTO_ACCEPTOR), "medium": ("Josh",), "high": ("Josh",),
 }
+# Who may approve/reject/disable a Memory Candidate. Invariant 6 requires "never self-promote",
+# not "must literally be the string Josh forever" -- flat (no risk tiers, unlike acceptance).
+DEFAULT_MEMORY_REVIEW_AUTHORITY: tuple[str, ...] = ("Josh",)
 
 _PROVIDER_FAMILIES = (
     (re.compile(r"^(codex|openai|gpt|o[0-9])", re.I), "openai"),
@@ -136,6 +139,7 @@ class WorkbenchEngine:
         *,
         auto_reconcile: bool = False,
         acceptance_authority: Mapping[str, Sequence[str]] | None = None,
+        memory_review_authority: Sequence[str] | None = None,
         pricing: Mapping[str, tuple[float, float]] | None = None,
         memory_ttl_days: int = DEFAULT_MEMORY_TTL_DAYS,
     ):
@@ -143,6 +147,11 @@ class WorkbenchEngine:
         acceptance_authority: risk_level -> allowed `accepted_by` identities. Defaults to Josh for
             every tier (DEFAULT_ACCEPTANCE_AUTHORITY); pass TIERED_ACCEPTANCE_AUTHORITY to let the
             automated acceptor close low-risk Tickets.
+        memory_review_authority: allowed `reviewed_by` identities for `review_memory()`. Defaults
+            to Josh only (DEFAULT_MEMORY_REVIEW_AUTHORITY). Previously this was a bare
+            `if reviewed_by != "Josh"` hardcoded in review_memory() itself -- inconsistent with
+            acceptance_authority's configurability for no real reason, since Invariant 6 only
+            requires "never self-promote", not "must literally be Josh forever".
         pricing: runner-or-model label -> (usd per 1M input tokens, usd per 1M output tokens).
             Without an entry, cost_usd stays NULL; token counts are still recorded.
         memory_ttl_days: default lifetime of an approved memory when the reviewer gives no expiry.
@@ -155,6 +164,10 @@ class WorkbenchEngine:
             if level != "low" and AUTO_ACCEPTOR in authority[level]:
                 raise ValueError("Automated acceptance is only permitted for low-risk Tickets")
         self.acceptance_authority = {level: tuple(authority[level]) for level in RISK_LEVELS}
+        memory_reviewers = tuple(memory_review_authority) if memory_review_authority is not None else DEFAULT_MEMORY_REVIEW_AUTHORITY
+        if not memory_reviewers:
+            raise ValueError("memory_review_authority must list at least one reviewer")
+        self.memory_review_authority = memory_reviewers
         self.pricing = dict(pricing or {})
         if memory_ttl_days <= 0:
             raise ValueError("memory_ttl_days must be positive")
@@ -991,8 +1004,10 @@ class WorkbenchEngine:
         expired memory is an ordinary `approve` with a fresh expiry."""
         if action not in {"approve", "reject", "disable"}:
             raise ValueError("Memory review action must be approve, reject, or disable")
-        if reviewed_by != "Josh":
-            raise AcceptanceRequiredError("Memory candidate promotion requires Josh")
+        if reviewed_by not in self.memory_review_authority:
+            raise AcceptanceRequiredError(
+                f"Memory candidate promotion requires one of: {', '.join(self.memory_review_authority)}"
+            )
         if expires_at is not None and ttl_days is not None:
             raise ValueError("Give expires_at or ttl_days, not both")
         if ttl_days is not None and (isinstance(ttl_days, bool) or not isinstance(ttl_days, int)):
@@ -1141,6 +1156,7 @@ class WorkbenchEngine:
             "integrity": self.store.integrity_check(),
             "schema_version": self.store.schema_version(),
             "acceptance_authority": {k: list(v) for k, v in self.acceptance_authority.items()},
+            "memory_review_authority": list(self.memory_review_authority),
             "tickets_by_risk": tickets_by_risk,
             "runs_still_running": running,
             "evidence": self.check_evidence_integrity(),
