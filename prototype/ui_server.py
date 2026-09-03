@@ -291,7 +291,9 @@ class PrototypeHandler(BaseHTTPRequestHandler):
 
 
 def run():
-    server = HTTPServer(("127.0.0.1", PORT), PrototypeHandler)
+    # 0.0.0.0 so this is reachable from outside the container when run under Docker
+    # (127.0.0.1 would only be reachable from inside the container's own network namespace).
+    server = HTTPServer(("0.0.0.0", PORT), PrototypeHandler)
     print(f"Company AI Workbench Prototype UI running at http://localhost:{PORT}")
     try:
         server.serve_forever()
