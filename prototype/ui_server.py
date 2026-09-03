@@ -10,7 +10,7 @@ import sys
 from http import HTTPStatus
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -282,10 +282,16 @@ class PrototypeHandler(BaseHTTPRequestHandler):
 
         self.send_response(HTTPStatus.SEE_OTHER)
         redirect_url = "/"
+        # HTTP header values must be latin-1/ASCII; html.escape() only neutralizes <>&"' and
+        # leaves raw Chinese bytes in place, which crashes send_header() the instant a real
+        # (Traditional Chinese) msg/err reaches here -- every action in this Chinese-first UI
+        # was one non-ASCII success/error message away from ERR_EMPTY_RESPONSE. quote() percent-
+        # encodes to pure ASCII; render_html() still separately html.escape()s it for the HTML
+        # body once parse_qs has decoded it back on the GET side.
         if msg:
-            redirect_url += f"?msg={html.escape(msg)}"
+            redirect_url += f"?msg={quote(msg)}"
         elif err:
-            redirect_url += f"?err={html.escape(err)}"
+            redirect_url += f"?err={quote(err)}"
         self.send_header("Location", redirect_url)
         self.end_headers()
 
