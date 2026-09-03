@@ -110,6 +110,10 @@ def main(argv: list[str] | None = None) -> int:
     prompt_grp.add_argument("--prompt", metavar="TEXT")
     prompt_grp.add_argument("--prompt-file", type=Path, metavar="FILE")
     run_start.add_argument("--fake", action="store_true", help="Use fake runner (no real AI call)")
+    prompt_grp.add_argument("--manual-runner", metavar="LABEL",
+                            help="Record a Run done directly in this session (e.g. by an interactive Claude Code "
+                                 "agent), not through a managed subprocess Runner. Starts the Run under the given "
+                                 "label; pair with a later `wb run complete` once the work is done.")
     run_start.add_argument("--runner", choices=["gemini", "codex"], default="gemini",
                            help="Runner to execute prompt with (default: gemini)")
     run_start.add_argument("--model", default=None, metavar="MODEL",
@@ -136,6 +140,10 @@ def main(argv: list[str] | None = None) -> int:
     run_show.add_argument("run_id")
     run_events = run_sub.add_parser("events")
     run_events.add_argument("run_id")
+    run_log = run_sub.add_parser("log", help="Append an audit-trail event to a Run (e.g. from a manual runner)")
+    run_log.add_argument("run_id")
+    run_log.add_argument("--kind", default="agent_activity", help="Event kind (default: agent_activity)")
+    run_log.add_argument("--note", required=True, help="Free-text summary stored as the event payload's 'summary'")
     run_list = run_sub.add_parser("list")
     run_list.add_argument("ticket_id")
 
@@ -277,8 +285,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         try:
             if args.run_action == "start":
+                if args.fake and args.manual_runner:
+                    return _err("--fake and --manual-runner are mutually exclusive")
                 if args.fake:
                     _out(engine.start_run(args.ticket_id, runner="fake"))
+                elif args.manual_runner:
+                    _out(engine.start_run(args.ticket_id, runner=args.manual_runner))
                 else:
                     # Resolve prompt
                     if args.prompt_file:
@@ -319,6 +331,8 @@ def main(argv: list[str] | None = None) -> int:
                 _out(engine.get_run(args.run_id))
             elif args.run_action == "events":
                 _out(engine.list_events(args.run_id))
+            elif args.run_action == "log":
+                _out(engine.append_event(args.run_id, args.kind, {"summary": args.note}))
             elif args.run_action == "list":
                 _out(engine.list_runs(args.ticket_id))
         except (*_GOVERNANCE_ERRORS, RunnerLaunchError) as exc:

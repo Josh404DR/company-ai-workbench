@@ -623,6 +623,39 @@ class GovernanceCliTestCase(unittest.TestCase):
             code = main(["--database", self.db, *argv])
         return code, out.getvalue(), err.getvalue()
 
+    def test_manual_runner_and_log_via_cli(self):
+        # Regression for real friction hit dogfooding this CLI: there was no way to record a
+        # Run done directly by an interactive session (not a managed subprocess Runner) or to
+        # append an audit-trail event to it, short of dropping into raw Python.
+        _, out, _ = self.run_cli("workspace", "create", "W")
+        ws = json.loads(out)["id"]
+        _, out, _ = self.run_cli("project", "create", ws, "P")
+        prj = json.loads(out)["id"]
+        _, out, _ = self.run_cli("ticket", "create", prj, "T", "--goal", "g", "--criteria", "c")
+        tkt = json.loads(out)["id"]
+
+        code, out, _ = self.run_cli("run", "start", tkt, "--manual-runner", "claude-code")
+        self.assertEqual(0, code)
+        run = json.loads(out)
+        self.assertEqual(("claude-code", "running"), (run["runner"], run["status"]))
+
+        code, _, err = self.run_cli("run", "start", tkt, "--fake", "--manual-runner", "claude-code")
+        self.assertEqual(1, code)
+        self.assertIn("mutually exclusive", err)
+
+        code, out, _ = self.run_cli("run", "log", run["id"], "--note", "did the thing")
+        self.assertEqual(0, code)
+        event = json.loads(out)
+        self.assertEqual(("agent_activity", "did the thing"), (event["kind"], event["payload"]["summary"]))
+
+        code, out, _ = self.run_cli("run", "log", run["id"], "--kind", "checkpoint", "--note", "halfway")
+        self.assertEqual(0, code)
+        self.assertEqual("checkpoint", json.loads(out)["kind"])
+
+        _, out, _ = self.run_cli("run", "events", run["id"])
+        kinds = [e["kind"] for e in json.loads(out)]
+        self.assertEqual(["run_started", "agent_activity", "checkpoint"], kinds)
+
     def test_full_governed_lifecycle_via_cli(self):
         _, out, _ = self.run_cli("workspace", "create", "W")
         ws = json.loads(out)["id"]

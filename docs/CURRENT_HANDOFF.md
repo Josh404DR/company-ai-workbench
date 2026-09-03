@@ -1,9 +1,9 @@
 # Current Handoff
 
-- Stage: **Governance hardening v0.2 is `builder_checked_pending_independent_verify`** (Claude Builder, 2026-09-02). Everything through Phase 3 remains `independent_verify_pass`.
-- Last reliable stopping point: 97/97 tests PASS (30 subtests) on Python 3.13 via
+- Stage: **Governance hardening v0.2 is `builder_checked_pending_independent_verify`** (Claude Fable 5.1 Builder, 2026-09-02; second-pass review by Claude Sonnet 5, same day — found and fixed 2 real bugs, see below). Everything through Phase 3 remains `independent_verify_pass`. No cross-provider independent verification has happened yet for v2.0 (see "Next action").
+- Last reliable stopping point: 101/101 tests PASS (30 subtests) on Python 3.13 via
   `PYTHONPATH=src uv run --no-project --python 3.13 --with pytest python -m pytest -q`; `compileall` PASS; `diagnose` PASS on the real database (schema v5, evidence ok, 0 orphan worktrees).
-- What this round added (schema v5, all additive; memory_candidates rebuilt for the new status set):
+- Governance hardening v0.2 (schema v5, all additive; memory_candidates rebuilt for the new status set):
   1. Invariant 11 verifier independence: `verify_run(..., verifier_provider=)` rejects same-family verifier/builder; acceptance re-checks the pinned Verification.
   2. Content-addressed evidence: `evidence_content` / `evidence_path` hashed into append-only `evidence_artifacts`; acceptance refuses missing or mismatched evidence; `wb evidence show|check`.
   3. Memory expiry: approval carries `expires_at` (default 90 days), `source_commit`, `reviewed_by`; expired memories never injected; `wb memory expire|context`.
@@ -11,11 +11,16 @@
   5. Tiered acceptance: Ticket `risk_level` (default high, fixed at creation); `TIERED_ACCEPTANCE_AUTHORITY` lets the automated acceptor close low-risk Tickets after a passing `--verify-cmd`; CLI flag `--auto-accept-low-risk`.
   6. Ticket import: `wb ticket import PROJECT FILE` (JSON or Markdown), all-or-nothing, duplicate-safe.
   7. Worktree lifecycle: Run worktrees are committed to `wb-run/<run>` and removed at finalization; `wb worktree list|prune`. Leftover `RUN-6ae9f4c6` was pruned (commit `7c9ffea` on its branch).
+  8. Second-pass fixes (Sonnet 5 review): `provider_account` is now redacted through the same secret-pattern scrubber as Runner stdout/stderr (a real key pasted into that label would previously have been stored in plaintext); `ttl_days=True` on `review_memory()` is rejected instead of silently being treated as `ttl_days=1` (bool is an int subtype in Python).
+- CLI additions from real dogfooding friction (2026-09-03): `wb run start TICKET --manual-runner LABEL` records a Run done directly in an interactive session (not a managed subprocess Runner) — previously the only options were `--fake` or the full managed `--prompt` path, so recording "Claude Code did this work directly" required dropping into raw Python. `wb run log RUN_ID --note TEXT [--kind KIND]` appends an audit-trail event (default kind `agent_activity`) — previously only readable via `wb run events`, not appendable from the CLI.
+- Deployment: the prototype UI (`prototype/ui_server.py`) is Dockerized — `docker compose up -d company-ai-workbench` from the workspace root, port 8088, container `company-ai-workbench-local`, `.workbench/` volume-mounted so the real database survives rebuilds. A real bug was found and fixed in production use: the post-action redirect crashed (`ERR_EMPTY_RESPONSE`) on any Chinese success/error message because it used `html.escape()` instead of URL-percent-encoding for the `Location` header, which must be latin-1-safe — this hit on the very first real click through the browser. Fixed via `urllib.parse.quote()`.
+- Real dogfooding evidence: two real Tickets (`TKT-e8da7b79`, `TKT-ac684a29`, both risk `high`) tracked the actual extraction of the `ai-copy-engine` package out of `ai-tool-core` and the follow-up council-decided fixes in this same session — real `Run` → `Verification` (evidence: pytest output + git commit hashes, `verifier_provider=local-command`, independent of the `claude-code` builder runner per Invariant 11) → `accept_ticket(accepted_by="Josh")` via the prototype UI's real Accept button. One Memory Candidate (`MEM-b1891afd`, the lesson "a nested audit result that never gets merged into the caller-visible top-level status is decorative") proposed and approved by Josh, expires 2026-12-02.
 - Real database notes:
   - `.workbench/backups/pre-v5-20260902.db` was taken through the CLI, so it is already at schema v5 (the CLI migrates on open). The migration was additive; the two legacy Verifications keep NULL provider/hash and can no longer back a new Acceptance (existing Acceptances untouched).
-  - Both real Runs have `runs_without_usage=1`: usage is only captured for Runs started after this change.
+  - `diagnose`'s `usage` block now shows real runners used so far: `claude-code` (2 manual runs), `codex-cli`, `fake`, `gemini` (1 each) — all `runs_without_usage` since none of these were started with token/cost evidence attached (only real managed-Runner subprocess invocations capture that automatically; manual runs would need `wb run usage`).
 - Next action:
-  - Independent verification of this round (a verifier that is not Claude, per the spirit of Invariant 11).
-  - Dogfood: run real Tickets through `wb ticket import` -> `wb run start --worktree --verify-cmd` -> `wb verify` -> `wb accept` for two weeks before expanding Runners or building delivery adapters.
-- Source boundary: `ticket-coding-station` was not modified. Nothing was committed or pushed.
-- Remaining boundary: real Codex CLI execution (upstream quota until 9/22), PySide6 GUI, deployment, PR/merge/deploy adapters.
+  - Independent verification of governance v2.0 by a non-Claude reviewer (the Sonnet 5 second-pass review does not count -- `provider_of()` collapses every Claude model onto the same `anthropic` family, so it fails the same test this engine enforces on everyone else).
+  - Continue dogfooding: this is real usage but still far short of "two weeks" -- keep routing real work through `wb ticket create/import` -> `wb run start` -> `wb verify` -> `wb accept` before expanding Runners or building delivery adapters.
+  - Not yet pushed to a GitHub remote (unlike the sibling `ai-copy-engine` extraction, which is at `github.com/sayaJosh/ai-copy-engine`, private) -- no instruction to push this one yet.
+- Source boundary: `ticket-coding-station` was not modified.
+- Remaining boundary: real Codex CLI execution (upstream quota until 9/22), PySide6 GUI, PR/merge/deploy adapters.
