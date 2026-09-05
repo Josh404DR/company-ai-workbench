@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class SQLiteStore:
@@ -99,7 +99,34 @@ class SQLiteStore:
                 connection.execute(
                     "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (5, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
                 )
+            if 6 not in applied:
+                self._apply_v6(connection)
+                connection.execute(
+                    "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (6, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+                )
             connection.commit()
+
+    @staticmethod
+    def _apply_v6(connection: sqlite3.Connection) -> None:
+        """Long tasks (goals) and ticket dependency hierarchy."""
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS goals (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id),
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('planned','in_progress','achieved','blocked','cancelled')),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+        ticket_columns = {row[1] for row in connection.execute("PRAGMA table_info(tickets)")}
+        if ticket_columns and "goal_id" not in ticket_columns:
+            connection.execute("ALTER TABLE tickets ADD COLUMN goal_id TEXT REFERENCES goals(id)")
+        if ticket_columns and "depends_on_ticket_id" not in ticket_columns:
+            connection.execute("ALTER TABLE tickets ADD COLUMN depends_on_ticket_id TEXT REFERENCES tickets(id)")
 
     @staticmethod
     def _apply_v5(connection: sqlite3.Connection) -> None:

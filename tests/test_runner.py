@@ -67,6 +67,19 @@ class CodexCliRunnerTestCase(unittest.TestCase):
         self.assertIn("-m", argv_model)
         self.assertEqual(argv_model[argv_model.index("-m") + 1], "o3")
 
+    def test_default_model_and_env_fallback(self):
+        executor = FakeExecutor(ProcessResult(0, '{"ok":true}', pid=42))
+        runner = CodexCliRunner(executor=executor, default_model="gpt-5.5")
+        runner.run("work", cwd=self.cwd)
+        argv, _ = executor.calls[0]
+        self.assertIn("-m", argv)
+        self.assertEqual("gpt-5.5", argv[argv.index("-m") + 1])
+
+        # Explicit model overrides default_model
+        runner.run("work override", cwd=self.cwd, model="o3")
+        argv_override, _ = executor.calls[1]
+        self.assertEqual("o3", argv_override[argv_override.index("-m") + 1])
+
     def test_rejects_unallowlisted_executable(self):
         with self.assertRaises(ValueError):
             CodexCliRunner("powershell.exe")

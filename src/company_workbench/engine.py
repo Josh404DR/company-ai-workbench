@@ -199,11 +199,27 @@ class WorkbenchEngine:
         return item
 
     def create_ticket(
-        self, project_id: str, title: str, goal: str, acceptance_criteria: list[str], *, risk_level: str = "high",
+        self,
+        project_id: str,
+        title: str,
+        goal: str,
+        acceptance_criteria: list[str],
+        *,
+        risk_level: str = "high",
+        goal_id: str | None = None,
+        depends_on_ticket_id: str | None = None,
     ) -> dict[str, Any]:
         """risk_level is fixed at creation (default 'high' = Josh-only acceptance). There is
         deliberately no setter: lowering risk after the fact would be an acceptance bypass."""
-        item = self._ticket_row(project_id, title, goal, acceptance_criteria, risk_level)
+        item = self._ticket_row(
+            project_id,
+            title,
+            goal,
+            acceptance_criteria,
+            risk_level,
+            goal_id=goal_id,
+            depends_on_ticket_id=depends_on_ticket_id,
+        )
         try:
             with self.store.transaction() as db:
                 self._insert_ticket(db, item)
@@ -212,7 +228,15 @@ class WorkbenchEngine:
         return self.get_ticket(item["id"])
 
     @staticmethod
-    def _ticket_row(project_id: str, title: str, goal: str, acceptance_criteria: list[str], risk_level: str) -> dict[str, Any]:
+    def _ticket_row(
+        project_id: str,
+        title: str,
+        goal: str,
+        acceptance_criteria: list[str],
+        risk_level: str,
+        goal_id: str | None = None,
+        depends_on_ticket_id: str | None = None,
+    ) -> dict[str, Any]:
         criteria = [str(value).strip() for value in acceptance_criteria if str(value).strip()]
         if not title.strip() or not goal.strip() or not criteria:
             raise ValueError("Ticket requires title, goal, and acceptance criteria")
@@ -220,16 +244,25 @@ class WorkbenchEngine:
             raise ValueError(f"Ticket risk_level must be one of {', '.join(RISK_LEVELS)}")
         now = _now()
         return {
-            "id": _id("TKT"), "project_id": project_id, "title": title.strip(), "goal": goal.strip(),
-            "acceptance_criteria_json": json.dumps(criteria, ensure_ascii=False), "status": "ready",
-            "risk_level": risk_level, "created_at": now, "updated_at": now,
+            "id": _id("TKT"),
+            "project_id": project_id,
+            "title": title.strip(),
+            "goal": goal.strip(),
+            "acceptance_criteria_json": json.dumps(criteria, ensure_ascii=False),
+            "status": "ready",
+            "risk_level": risk_level,
+            "goal_id": goal_id,
+            "depends_on_ticket_id": depends_on_ticket_id,
+            "created_at": now,
+            "updated_at": now,
         }
 
     @staticmethod
     def _insert_ticket(db: sqlite3.Connection, item: dict[str, Any]) -> None:
         db.execute(
-            """INSERT INTO tickets(id,project_id,title,goal,acceptance_criteria_json,status,risk_level,created_at,updated_at)
-               VALUES (:id,:project_id,:title,:goal,:acceptance_criteria_json,:status,:risk_level,:created_at,:updated_at)""", item
+            """INSERT INTO tickets(id,project_id,title,goal,acceptance_criteria_json,status,risk_level,goal_id,depends_on_ticket_id,created_at,updated_at)
+               VALUES (:id,:project_id,:title,:goal,:acceptance_criteria_json,:status,:risk_level,:goal_id,:depends_on_ticket_id,:created_at,:updated_at)""",
+            item,
         )
 
     def import_tickets(self, project_id: str, source: str | Path, *, default_risk_level: str = "high") -> list[dict[str, Any]]:
@@ -450,6 +483,7 @@ class WorkbenchEngine:
             result,
             worktree_env=worktree_env,
             verification_command=verification_command,
+            cwd=target_cwd,
             provider_account=provider_account,
             runner_label=model or runner_name,
             keep_worktree=keep_worktree,
@@ -463,14 +497,20 @@ class WorkbenchEngine:
         *,
         worktree_env: Any | None = None,
         verification_command: str | None = None,
+        cwd: Path | str | None = None,
         provider_account: str | None = None,
         runner_label: str | None = None,
         keep_worktree: bool = False,
     ) -> dict[str, Any]:
         now = _now()
         verification_result = None
-        if worktree_env and verification_command and result.outcome == "completed":
-            verification_result = worktree_env.run_verification(verification_command)
+        if verification_command and result.outcome == "completed":
+            if worktree_env:
+                verification_result = worktree_env.run_verification(verification_command)
+            elif cwd:
+                from .worktree import WorktreeEnvironment
+                dummy = WorktreeEnvironment(run_id, "", Path(cwd), Path(cwd))
+                verification_result = dummy.run_verification(verification_command)
         usage = result.usage or {}
         input_tokens = usage.get("input_tokens")
         output_tokens = usage.get("output_tokens")
@@ -1123,9 +1163,15 @@ class WorkbenchEngine:
             rows = db.execute("SELECT * FROM projects WHERE workspace_id=? ORDER BY created_at", (workspace_id,)).fetchall()
         return [dict(r) for r in rows]
 
-    def list_tickets(self, project_id: str) -> list[dict[str, Any]]:
+    def list_tickets(self, project_id: str, *, goal_id: str | None = None) -> list[dict[str, Any]]:
         with self.store.connect() as db:
-            rows = db.execute("SELECT * FROM tickets WHERE project_id=? ORDER BY created_at", (project_id,)).fetchall()
+            if goal_id is not None:
+                rows = db.execute(
+                    "SELECT * FROM tickets WHERE project_id=? AND goal_id=? ORDER BY created_at",
+                    (project_id, goal_id),
+                ).fetchall()
+            else:
+                rows = db.execute("SELECT * FROM tickets WHERE project_id=? ORDER BY created_at", (project_id,)).fetchall()
         result = []
         for row in rows:
             item = dict(row)
@@ -1182,3 +1228,287 @@ class WorkbenchEngine:
             for env in manager.list_run_worktrees()
             if statuses.get(env.run_id) != "running"
         ]
+
+    # -------------------------------------------------------------------------
+    # Long Tasks: Goal Orchestration
+    # -------------------------------------------------------------------------
+
+    def create_goal(self, project_id: str, title: str, description: str = "") -> dict[str, Any]:
+        if not title.strip():
+            raise ValueError("Goal requires title")
+        now = _now()
+        item = {
+            "id": _id("GOL"),
+            "project_id": project_id,
+            "title": title.strip(),
+            "description": description.strip(),
+            "status": "planned",
+            "created_at": now,
+            "updated_at": now,
+        }
+        with self.store.transaction() as db:
+            if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+                raise NotFoundError(f"Project not found: {project_id}")
+            db.execute(
+                """INSERT INTO goals(id,project_id,title,description,status,created_at,updated_at)
+                   VALUES (:id,:project_id,:title,:description,:status,:created_at,:updated_at)""",
+                item,
+            )
+        return self.get_goal(item["id"])
+
+    def get_goal(self, goal_id: str) -> dict[str, Any]:
+        with self.store.connect() as db:
+            row = db.execute("SELECT * FROM goals WHERE id=?", (goal_id,)).fetchone()
+            if not row:
+                raise NotFoundError(f"Goal not found: {goal_id}")
+            goal = dict(row)
+            tickets = db.execute(
+                "SELECT * FROM tickets WHERE goal_id=? ORDER BY created_at", (goal_id,)
+            ).fetchall()
+        goal_tickets = []
+        for t in tickets:
+            item = dict(t)
+            item["acceptance_criteria"] = json.loads(item.pop("acceptance_criteria_json"))
+            goal_tickets.append(item)
+        goal["tickets"] = goal_tickets
+        total = len(goal_tickets)
+        accepted = sum(1 for t in goal_tickets if t["status"] == "accepted")
+        goal["total_tickets"] = total
+        goal["accepted_tickets"] = accepted
+        goal["progress_pct"] = round((accepted / total * 100.0), 1) if total > 0 else 0.0
+        return goal
+
+    def list_goals(self, project_id: str) -> list[dict[str, Any]]:
+        with self.store.connect() as db:
+            rows = db.execute("SELECT id FROM goals WHERE project_id=? ORDER BY created_at", (project_id,)).fetchall()
+        return [self.get_goal(row["id"]) for row in rows]
+
+    def link_ticket_to_goal(
+        self,
+        ticket_id: str,
+        goal_id: str,
+        *,
+        depends_on_ticket_id: str | None = None,
+    ) -> dict[str, Any]:
+        with self.store.transaction() as db:
+            ticket = db.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
+            if not ticket:
+                raise NotFoundError(f"Ticket not found: {ticket_id}")
+            goal = db.execute("SELECT * FROM goals WHERE id=?", (goal_id,)).fetchone()
+            if not goal:
+                raise NotFoundError(f"Goal not found: {goal_id}")
+            if ticket["project_id"] != goal["project_id"]:
+                raise ValueError("Ticket and Goal must belong to the same Project")
+            if depends_on_ticket_id:
+                dep = db.execute("SELECT * FROM tickets WHERE id=?", (depends_on_ticket_id,)).fetchone()
+                if not dep:
+                    raise NotFoundError(f"Dependency Ticket not found: {depends_on_ticket_id}")
+                if dep["id"] == ticket_id:
+                    raise ValueError("Ticket cannot depend on itself")
+            now = _now()
+            db.execute(
+                "UPDATE tickets SET goal_id=?, depends_on_ticket_id=?, updated_at=? WHERE id=?",
+                (goal_id, depends_on_ticket_id, now, ticket_id),
+            )
+        return self.get_ticket(ticket_id)
+
+    def get_next_runnable_ticket_for_goal(self, goal_id: str) -> dict[str, Any] | None:
+        """Find the first ready Ticket under this Goal whose dependency (if any) is accepted."""
+        goal = self.get_goal(goal_id)
+        tickets = goal["tickets"]
+        status_map = {t["id"]: t["status"] for t in tickets}
+        for ticket in tickets:
+            if ticket["status"] != "ready":
+                continue
+            dep_id = ticket.get("depends_on_ticket_id")
+            if dep_id and status_map.get(dep_id) != "accepted":
+                continue
+            return ticket
+        return None
+
+    # -------------------------------------------------------------------------
+    # Short Tasks: Ticket-internal Auto-Debug Loop
+    # -------------------------------------------------------------------------
+
+    def run_ticket_auto_debug_loop(
+        self,
+        ticket_id: str,
+        runner: Any,
+        prompt: str,
+        cwd: str | Path,
+        *,
+        verification_command: str,
+        max_attempts: int = 3,
+        isolate_worktree: bool = True,
+        timeout_seconds: float = 300.0,
+        model: str | None = None,
+        sensitive_values: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Execute a Ticket with an internal auto-debug retry loop.
+        If a Run or its verification fails, diagnostics are captured, a DebugEpisode
+        is recorded, and the runner is re-prompted with the failure context until
+        the verification passes or max_attempts is reached.
+        """
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
+
+        ticket = self.get_ticket(ticket_id)
+        current_prompt = prompt
+        attempts_recorded = []
+        last_run = None
+
+        for attempt in range(1, max_attempts + 1):
+            run = self.start_managed_run(
+                ticket_id=ticket_id,
+                runner=runner,
+                prompt=current_prompt,
+                cwd=cwd,
+                verification_command=verification_command,
+                isolate_worktree=isolate_worktree,
+                timeout_seconds=timeout_seconds,
+                model=model,
+                sensitive_values=sensitive_values,
+                keep_worktree=False,
+            )
+            last_run = run
+
+            # Check if verification passed
+            with self.store.connect() as db:
+                v = db.execute(
+                    "SELECT * FROM verifications WHERE run_id=? AND status='passed' ORDER BY rowid DESC LIMIT 1",
+                    (run["id"],),
+                ).fetchone()
+
+            if run["status"] == "completed" and v is not None:
+                return {
+                    "success": True,
+                    "attempts": attempt,
+                    "latest_run": run,
+                    "ticket": self.get_ticket(ticket_id),
+                    "debug_episodes": attempts_recorded,
+                }
+
+            # Failure: extract failure information
+            error_code = run.get("error_code") or "RUN-FAILED"
+            error_msg = run.get("error_message") or ""
+            events = self.list_events(run["id"])
+            output_event = next((e for e in reversed(events) if e["kind"] in ("invocation_output", "run_failed")), None)
+            output_payload = output_event["payload"] if output_event else {}
+            v_res = output_payload.get("verification_result") or {}
+            v_stderr = v_res.get("stderr", "")
+            v_stdout = v_res.get("stdout", "")
+            stdout = output_payload.get("stdout", "")
+            stderr = output_payload.get("stderr", "")
+            diag_snippet = v_stderr or v_stdout or stderr or stdout or error_msg
+
+            # Record DebugEpisode for this failed attempt
+            fingerprint = f"{error_code}:{hashlib.sha256((diag_snippet or error_code).encode('utf-8')).hexdigest()[:8]}"
+            episode = self.record_debug_episode(
+                run_id=run["id"],
+                symptom=f"Auto-debug attempt {attempt} failed: {error_code}",
+                reproduction=verification_command,
+                environment=f"runner={runner.name if hasattr(runner, 'name') else 'runner'}, attempt={attempt}/{max_attempts}",
+                error_fingerprint=fingerprint,
+                root_cause=error_msg or f"Verification exit code {v_res.get('exit_code', 'unknown')}",
+                accepted_fix=f"Pending attempt {attempt + 1}" if attempt < max_attempts else "Exhausted attempts",
+                regression_test=verification_command,
+                hypotheses=[f"Attempt {attempt} failed, applying diagnostic feedback"],
+                attempted_fixes=[f"Attempt {attempt} prompt provided"],
+                failed_attempts=[{"attempt": attempt, "error": error_code, "diagnostics": diag_snippet[:1000]}],
+            )
+            attempts_recorded.append(episode)
+
+            with self.store.transaction() as db:
+                self._append_event(
+                    db,
+                    run["id"],
+                    "auto_debug_attempt_failed",
+                    {"attempt": attempt, "max_attempts": max_attempts, "error_code": error_code},
+                )
+
+            if attempt < max_attempts:
+                current_prompt = (
+                    f"{prompt}\n\n"
+                    f"--- AUTOMATED DEBUG FEEDBACK (Attempt {attempt}/{max_attempts}) ---\n"
+                    f"Previous run {run['id']} failed with error: {error_code}\n"
+                    f"Diagnostics / Verification output:\n{diag_snippet}\n"
+                    f"Please fix the implementation so that the verification passes."
+                )
+
+        return {
+            "success": False,
+            "attempts": max_attempts,
+            "latest_run": last_run,
+            "ticket": self.get_ticket(ticket_id),
+            "debug_episodes": attempts_recorded,
+        }
+
+    def advance_goal(
+        self,
+        goal_id: str,
+        runner: Any,
+        cwd: str | Path,
+        *,
+        verification_command: str,
+        max_attempts_per_ticket: int = 3,
+        auto_accept_low_risk: bool = True,
+        isolate_worktree: bool = True,
+    ) -> dict[str, Any]:
+        """Advance a Goal by executing the next unblocked ticket using the auto-debug loop."""
+        goal = self.get_goal(goal_id)
+        if goal["status"] in ("achieved", "cancelled"):
+            return {"goal": goal, "action": "noop", "message": f"Goal is already {goal['status']}"}
+
+        next_ticket = self.get_next_runnable_ticket_for_goal(goal_id)
+        if not next_ticket:
+            all_accepted = all(t["status"] == "accepted" for t in goal["tickets"])
+            new_status = "achieved" if (all_accepted and len(goal["tickets"]) > 0) else goal["status"]
+            if new_status != goal["status"]:
+                now = _now()
+                with self.store.transaction() as db:
+                    db.execute("UPDATE goals SET status=?, updated_at=? WHERE id=?", (new_status, now, goal_id))
+                goal = self.get_goal(goal_id)
+            return {"goal": goal, "action": "none_runnable", "all_accepted": all_accepted}
+
+        # Update goal status to in_progress if planned
+        if goal["status"] == "planned":
+            now = _now()
+            with self.store.transaction() as db:
+                db.execute("UPDATE goals SET status='in_progress', updated_at=? WHERE id=?", (now, goal_id))
+
+        # Run ticket via auto debug loop
+        criteria = next_ticket.get("acceptance_criteria") or []
+        criteria_text = "\n".join(f"- {c}" for c in criteria)
+        ticket_prompt = (
+            f"Goal: {goal['title']}\n"
+            f"Ticket: {next_ticket['title']}\n"
+            f"Requirement: {next_ticket['goal']}\n"
+        )
+        if criteria_text:
+            ticket_prompt += f"Acceptance Criteria:\n{criteria_text}\n"
+        loop_result = self.run_ticket_auto_debug_loop(
+            ticket_id=next_ticket["id"],
+            runner=runner,
+            prompt=ticket_prompt,
+            cwd=cwd,
+            verification_command=verification_command,
+            max_attempts=max_attempts_per_ticket,
+            isolate_worktree=isolate_worktree,
+        )
+
+        # Refresh goal progress
+        updated_goal = self.get_goal(goal_id)
+        all_done = all(t["status"] == "accepted" for t in updated_goal["tickets"])
+        if all_done and len(updated_goal["tickets"]) > 0:
+            now = _now()
+            with self.store.transaction() as db:
+                db.execute("UPDATE goals SET status='achieved', updated_at=? WHERE id=?", (now, goal_id))
+            updated_goal = self.get_goal(goal_id)
+
+        return {
+            "goal": updated_goal,
+            "action": "ran_ticket",
+            "ticket_id": next_ticket["id"],
+            "loop_result": loop_result,
+        }
+

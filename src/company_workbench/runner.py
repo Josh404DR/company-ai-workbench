@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -100,9 +102,30 @@ class SubprocessExecutor:
     def start(self, argv: Sequence[str], *, cwd: Path) -> ProcessHandle:
         stdout_file = tempfile.TemporaryFile("w+b")
         stderr_file = tempfile.TemporaryFile("w+b")
+        resolved_argv = list(argv)
+        if resolved_argv:
+            exe_target = resolved_argv[0]
+            if not Path(exe_target).is_absolute():
+                cmd_path = shutil.which(exe_target)
+                if cmd_path:
+                    exe_target = cmd_path
+            target_path = Path(exe_target)
+            if target_path.suffix.lower() in (".cmd", ".bat"):
+                # On Windows, npm global .cmd scripts lose multiline args in %*.
+                # If the backing JS entry point exists under node_modules, invoke node directly.
+                stem = target_path.stem.lower()
+                js_candidate = target_path.parent / "node_modules" / "@openai" / stem / "bin" / f"{stem}.js"
+                if not js_candidate.exists():
+                    js_candidate = target_path.parent / "node_modules" / stem / "bin" / f"{stem}.js"
+                if js_candidate.exists() and shutil.which("node"):
+                    resolved_argv = ["node", str(js_candidate)] + resolved_argv[1:]
+                else:
+                    resolved_argv[0] = str(target_path)
+            else:
+                resolved_argv[0] = str(target_path)
         try:
             process = subprocess.Popen(
-                list(argv), cwd=cwd, shell=False, stdin=subprocess.DEVNULL,
+                resolved_argv, cwd=cwd, shell=False, stdin=subprocess.DEVNULL,
                 stdout=stdout_file, stderr=stderr_file,
             )
         except Exception:
@@ -158,11 +181,17 @@ class RunnerInvocation:
 
 
 class CodexCliRunner:
-    def __init__(self, executable: str = "codex", executor: ProcessExecutor | None = None):
+    def __init__(
+        self,
+        executable: str = "codex",
+        executor: ProcessExecutor | None = None,
+        default_model: str | None = None,
+    ):
         if executable.lower() not in _ALLOWED_EXECUTABLES or Path(executable).name != executable:
             raise ValueError("Codex executable is not allowlisted")
         self.executable = executable
         self.executor = executor or SubprocessExecutor()
+        self.default_model = default_model or os.environ.get("CODEX_MODEL")
 
     def _build_invocation(
         self, prompt: str, cwd: str | Path, timeout_seconds: float, max_output_chars: int,
@@ -184,8 +213,9 @@ class CodexCliRunner:
             "--json",
             "--cd", str(workdir),
         ]
-        if model:
-            argv += ["-m", model]
+        effective_model = model or self.default_model
+        if effective_model:
+            argv += ["-m", effective_model]
         argv.append(prompt)
         return workdir, tuple(argv)
 

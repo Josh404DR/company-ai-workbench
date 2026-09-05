@@ -1,5 +1,28 @@
 # Verification Log
 
+## 2026-09-06 — Short Tasks (Auto-Debug Loop) & Long Tasks (Goal Orchestration) with Real Codex CLI
+
+- **Schema upgraded to `SCHEMA_VERSION = 6`**:
+  - Added `goals` table (`id`, `project_id`, `title`, `description`, `status CHECK in ('planned','in_progress','achieved','blocked','cancelled')`, `created_at`, `updated_at`).
+  - Added `goal_id REFERENCES goals(id)` and `depends_on_ticket_id REFERENCES tickets(id)` to `tickets`.
+- **Short Task capability**:
+  - Added `run_ticket_auto_debug_loop` to `WorkbenchEngine`: runs managed invocations with automated verification command, catches non-zero exits/test failures, records `DebugEpisode` with fingerprint & diagnostics, appends `auto_debug_attempt_failed` audit event, and dynamically augments the prompt with failure feedback for the next attempt.
+- **Long Task capability**:
+  - Added Goal orchestration: `create_goal`, `get_goal`, `list_goals`, `link_ticket_to_goal`, `get_next_runnable_ticket_for_goal`.
+  - Added `advance_goal`: sequentially selects the next unblocked ticket (status `ready`), executes via `run_ticket_auto_debug_loop`, respects low-risk automated acceptance (`auto-acceptor`), and transitions Goal status to `achieved` upon 100% completion.
+  - Preserved Invariant 14 & 4: high-risk tickets cannot be auto-accepted; `advance_goal` safely halts at `none_runnable` until human review (Josh) explicitly accepts the ticket.
+- **Real Codex CLI Integration (`gpt-5.5`) on Windows**:
+  - Discovered Windows `cmd.exe` batch limitation in `codex.cmd`: `%*` argument expansion strips newlines, truncating multiline prompts.
+  - Fixed in `SubprocessExecutor`: automatically resolves npm global batch wrappers (`.cmd`) to direct `node.exe <codex.js>` invocation, preserving full multiline prompts, acceptance criteria, and diagnostic feedback without subprocess pipe deadlocks.
+  - Added `default_model` parameter and `CODEX_MODEL` environment variable support to `CodexCliRunner`, defaulting to `gpt-5.5` for ChatGPT account compatibility.
+  - Validated real end-to-end execution:
+    - Single ticket run with isolated worktree: Codex wrote files, automated verification (`local-command`) passed, ticket auto-accepted, goal marked achieved.
+    - Two-stage dependency pipeline: Ticket 1 completed & auto-accepted -> Ticket 2 unblocked, executed & auto-accepted -> Goal 100% achieved.
+- **Automated Test Results**:
+  - `tests/test_goals_and_auto_debug.py`: 8 tests (goal CRUD, ticket dependencies, immediate pass, debug loop recovery, max attempts exhaustion, goal pipeline orchestration, high-risk human acceptance requirement).
+  - Official test suite (`test_engine.py`, `test_governance.py`, `test_runner.py`, `test_worktree.py`, `test_goals_and_auto_debug.py`): **114 tests passed in 11.83s**.
+
+
 ## 2026-09-02 — first engine vertical slice
 
 Builder commands:
