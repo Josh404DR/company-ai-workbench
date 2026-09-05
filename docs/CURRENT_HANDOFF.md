@@ -1,32 +1,24 @@
 # Current Handoff
 
-- Stage: **Governance hardening v0.2 is `builder_checked_pending_independent_verify`** (Claude Fable 5.1 Builder, 2026-09-02; second-pass review by Claude Sonnet 5, same day — found and fixed 2 real bugs, see below). Everything through Phase 3 remains `independent_verify_pass`. No cross-provider independent verification has happened yet for v2.0 (see "Next action").
-- Last reliable stopping point: 101/101 tests PASS (30 subtests) on Python 3.13 via
-  `PYTHONPATH=src uv run --no-project --python 3.13 --with pytest python -m pytest -q`; `compileall` PASS; `diagnose` PASS on the real database (schema v5, evidence ok, 0 orphan worktrees).
-- Governance hardening v0.2 (schema v5, all additive; memory_candidates rebuilt for the new status set):
-  1. Invariant 11 verifier independence: `verify_run(..., verifier_provider=)` rejects same-family verifier/builder; acceptance re-checks the pinned Verification.
-  2. Content-addressed evidence: `evidence_content` / `evidence_path` hashed into append-only `evidence_artifacts`; acceptance refuses missing or mismatched evidence; `wb evidence show|check`.
-  3. Memory expiry: approval carries `expires_at` (default 90 days), `source_commit`, `reviewed_by`; expired memories never injected; `wb memory expire|context`.
-  4. Run usage: `input_tokens`, `output_tokens`, `cost_usd` (needs a pricing table), `provider_account`; `wb run usage`; `diagnose` shows per-runner totals.
-  5. Tiered acceptance: Ticket `risk_level` (default high, fixed at creation); `TIERED_ACCEPTANCE_AUTHORITY` lets the automated acceptor close low-risk Tickets after a passing `--verify-cmd`; CLI flag `--auto-accept-low-risk`.
-  6. Ticket import: `wb ticket import PROJECT FILE` (JSON or Markdown), all-or-nothing, duplicate-safe.
-  7. Worktree lifecycle: Run worktrees are committed to `wb-run/<run>` and removed at finalization; `wb worktree list|prune`. Leftover `RUN-6ae9f4c6` was pruned (commit `7c9ffea` on its branch).
-  8. Second-pass fixes (Sonnet 5 review): `provider_account` is now redacted through the same secret-pattern scrubber as Runner stdout/stderr (a real key pasted into that label would previously have been stored in plaintext); `ttl_days=True` on `review_memory()` is rejected instead of silently being treated as `ttl_days=1` (bool is an int subtype in Python).
-- CLI additions from real dogfooding friction (2026-09-03): `wb run start TICKET --manual-runner LABEL` records a Run done directly in an interactive session (not a managed subprocess Runner) — previously the only options were `--fake` or the full managed `--prompt` path, so recording "Claude Code did this work directly" required dropping into raw Python. `wb run log RUN_ID --note TEXT [--kind KIND]` appends an audit-trail event (default kind `agent_activity`) — previously only readable via `wb run events`, not appendable from the CLI.
-- Deployment: the prototype UI (`prototype/ui_server.py`) is Dockerized — `docker compose up -d company-ai-workbench` from the workspace root, port 8088, container `company-ai-workbench-local`, `.workbench/` volume-mounted so the real database survives rebuilds. A real bug was found and fixed in production use: the post-action redirect crashed (`ERR_EMPTY_RESPONSE`) on any Chinese success/error message because it used `html.escape()` instead of URL-percent-encoding for the `Location` header, which must be latin-1-safe — this hit on the very first real click through the browser. Fixed via `urllib.parse.quote()`.
-- Real dogfooding evidence: two real Tickets (`TKT-e8da7b79`, `TKT-ac684a29`, both risk `high`) tracked the actual extraction of the `ai-copy-engine` package out of `ai-tool-core` and the follow-up council-decided fixes in this same session — real `Run` → `Verification` (evidence: pytest output + git commit hashes, `verifier_provider=local-command`, independent of the `claude-code` builder runner per Invariant 11) → `accept_ticket(accepted_by="Josh")` via the prototype UI's real Accept button. One Memory Candidate (`MEM-b1891afd`, the lesson "a nested audit result that never gets merged into the caller-visible top-level status is decorative") proposed and approved by Josh, expires 2026-12-02.
-- Real database notes:
-  - `.workbench/backups/pre-v5-20260902.db` was taken through the CLI, so it is already at schema v5 (the CLI migrates on open). The migration was additive; the two legacy Verifications keep NULL provider/hash and can no longer back a new Acceptance (existing Acceptances untouched).
-  - `diagnose`'s `usage` block now shows real runners used so far: `claude-code` (2 manual runs), `codex-cli`, `fake`, `gemini` (1 each) — all `runs_without_usage` since none of these were started with token/cost evidence attached (only real managed-Runner subprocess invocations capture that automatically; manual runs would need `wb run usage`).
+- Stage: **Short-Task Auto-Debug Loop & Long-Task Goal Orchestration fully implemented and verified with Real Codex CLI (`gpt-5.5`)** (2026-09-06).
+- Last reliable stopping point: **114/114 tests PASS** across all 5 test suites (`test_engine.py`, `test_governance.py`, `test_runner.py`, `test_worktree.py`, `test_goals_and_auto_debug.py`); real end-to-end Codex CLI runs verified in isolated worktrees.
+- Major milestones completed:
+  1. **Schema v6 (Goals & Dependencies)**:
+     - Added `goals` table (`id`, `project_id`, `title`, `description`, `status CHECK in ('planned','in_progress','achieved','blocked','cancelled')`, `created_at`, `updated_at`).
+     - Added `goal_id` and `depends_on_ticket_id` to `tickets` table.
+  2. **Short Tasks (Ticket-internal Auto-Debug Loop)**:
+     - `run_ticket_auto_debug_loop`: executes managed runs, automatically captures test failures and stderr/stdout diagnostics, records immutable `DebugEpisode` records with fingerprints, appends audit events, and injects diagnostic feedback into retry attempts.
+  3. **Long Tasks (Goal Orchestration)**:
+     - `advance_goal`: sequentially advances unblocked tickets under a Goal, checks dependencies, runs the auto-debug loop, tracks dynamic completion progress (`progress_pct`), and marks the Goal `achieved`.
+     - Preserved Invariant 14 & 4: automated acceptance strictly limited to low-risk tickets with independent verification (`local-command`); medium and high-risk tickets halt for Josh's explicit review.
+  4. **Real Codex CLI Runner (`gpt-5.5`) on Windows**:
+     - Resolved the critical Windows batch `%*` limitation in npm's `codex.cmd` where newlines were stripped; `SubprocessExecutor` directly routes to `node.exe <codex.js>`, guaranteeing 100% prompt integrity.
+     - Added `default_model` parameter and `CODEX_MODEL` env var support, defaulting to `gpt-5.5` for ChatGPT account compatibility.
+     - Verified end-to-end against real Codex CLI with Git worktree isolation:
+       - Single ticket auto-completion & auto-acceptance.
+       - Multi-ticket sequential dependency pipeline (`Stage 1 -> Stage 2 -> Goal achieved`).
 - Next action:
-  - Independent verification of governance v2.0 by a non-Claude reviewer (the Sonnet 5 second-pass review does not count -- `provider_of()` collapses every Claude model onto the same `anthropic` family, so it fails the same test this engine enforces on everyone else).
-  - Continue dogfooding: this is real usage but still far short of "two weeks" -- keep routing real work through `wb ticket create/import` -> `wb run start` -> `wb verify` -> `wb accept` before expanding Runners or building delivery adapters.
-  - **A real Codex-managed Run is the single biggest untested item** -- `start_managed_run()` has never been exercised against a real Codex process, only `FakeExecutor`/local-Python-sleeper test doubles. This is the actual core value proposition and should be prioritized as soon as quota allows.
-  - Not yet pushed to a GitHub remote (unlike the sibling `ai-copy-engine` extraction, which is at `github.com/sayaJosh/ai-copy-engine`, private) -- no instruction to push this one yet.
-- Source boundary: `ticket-coding-station` was not modified (read-only lookup on 2026-09-03 for real Codex/Claude/Antigravity CLI invocation patterns already used by that project -- see below).
-- Codex CLI reality check (2026-09-03, corrects a stale claim below that said "upstream quota until 9/22" -- that date was wrong/outdated):
-  - `codex` CLI is installed on this machine (`codex-cli 0.152.1`) and logged in via ChatGPT (`codex login status` -> "Logged in using ChatGPT"). It is not blocked by auth.
-  - A real `codex exec --dangerously-bypass-approvals-and-sandbox --json "..."` probe (isolated scratch dir, no repo files touched) returned a genuine usage-limit error, not a login/auth failure: `"You've hit your usage limit... try again at 4:11 PM."` -- i.e. today (2026-09-03), a few hours out, not 9/22.
-  - `ticket-coding-station/server/src/task-manager.js` (read-only reference, not modified) confirms the exact real invocation shape this project's own `CodexCliRunner` already matches: `codex exec --dangerously-bypass-approvals-and-sandbox -` reading the prompt from stdin, plus a `codex login status` preflight check. It also documents the Antigravity CLI invocation (`agy --print --dangerously-skip-permissions` / `agy --prompt-interactive ... --dangerously-skip-permissions`, with a version-pin guard against `$env:AGY_EXPECTED_VERSION`) in case a future Runner adapter for it is wanted -- not built here, just confirmed the pattern exists as prior art.
-  - Action: once the daily quota resets, run one real `start_managed_run()` against the real Codex CLI (still isolated via `--worktree`, still a low-stakes prompt) to finally close this gap.
-- Remaining boundary: PySide6 GUI, PR/merge/deploy adapters.
+  - Dockerized prototype UI updates for Goal views / pipeline dashboard.
+  - Expand delivery adapters (PR/merge).
+- Remaining boundary: PySide6 desktop GUI, external GitHub PR integration.
+
