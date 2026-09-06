@@ -160,6 +160,29 @@ class CliGoalsTestCase(unittest.TestCase):
         g_deliv = json.loads(out)
         self.assertEqual("achieved", g_deliv["goal"]["status"])
 
+    def test_ui_and_serve_cli_dispatch(self):
+        from unittest.mock import patch
+
+        with patch("company_workbench.ui_server.serve_ui", return_value=0) as mock_serve:
+            code, out, err = self.run_cli(["ui", "--port", "9099", "--host", "0.0.0.0", "--no-browser"])
+            self.assertEqual(0, code)
+            mock_serve.assert_called_once_with(
+                database=self.db_path,
+                host="0.0.0.0",
+                port=9099,
+                open_browser=False,
+            )
+
+        with patch("company_workbench.ui_server.serve_ui", return_value=0) as mock_serve:
+            code, out, err = self.run_cli(["serve", "--port", "8888"])
+            self.assertEqual(0, code)
+            mock_serve.assert_called_once_with(
+                database=self.db_path,
+                host="127.0.0.1",
+                port=8888,
+                open_browser=True,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

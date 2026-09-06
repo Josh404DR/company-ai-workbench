@@ -103,6 +103,20 @@ class UiServerTestCase(unittest.TestCase):
         self.assertIn("完成進度: <strong>100.0%</strong>", body)
         self.assertIn("achieved", body)
 
+        # 6. POST /project/create
+        status, _, headers = self.request("POST", "/project/create", {
+            "workspace_id": self.ws["id"],
+            "name": "Another Project",
+        })
+        self.assertEqual(303, status)
+        prjs = self.engine.list_projects(self.ws["id"])
+        self.assertEqual(2, len(prjs))
+
+        # 7. Check / redirect message handling
+        status, body, _ = self.request("GET", "/?msg=TestSuccess")
+        self.assertEqual(200, status)
+        self.assertIn("TestSuccess", body)
+
 
 if __name__ == "__main__":
     unittest.main()

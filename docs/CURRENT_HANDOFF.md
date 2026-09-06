@@ -1,7 +1,7 @@
 # Current Handoff
 
-- Stage: **100% Milestone Completion (Phases 1-6 Delivered & Verified)** (2026-09-06).
-- Last reliable stopping point: **127/127 tests PASS** across all 8 test suites (`test_engine.py`, `test_governance.py`, `test_runner.py`, `test_worktree.py`, `test_goals_and_auto_debug.py`, `test_cli_goals.py`, `test_ui_server.py`, `test_delivery.py`).
+- Stage: **100% User-Ready Milestone Completion (Phases 1-6 Delivered & Verified for Direct End-User Operation)** (2026-09-06).
+- Last reliable stopping point: **128/128 tests PASS** across all 8 test suites (`test_engine.py`, `test_governance.py`, `test_runner.py`, `test_worktree.py`, `test_goals_and_auto_debug.py`, `test_cli_goals.py`, `test_ui_server.py`, `test_delivery.py`).
 - Major milestones completed:
   1. **Schema v6 (Goals & Dependencies)**:
      - Added `goals` table (`id`, `project_id`, `title`, `description`, `status CHECK in ('planned','in_progress','achieved','blocked','cancelled')`, `created_at`, `updated_at`).
@@ -17,12 +17,14 @@
      - Added `wb goal create`, `wb goal list`, `wb goal show`, `wb goal link`, `wb goal advance`.
      - Added `--goal-id` and `--depends-on` options to `wb ticket create`.
      - Added `wb ticket deliver` and `wb goal deliver` commands.
-  5. **Web UI Upgrade (`prototype/ui_server.py`)**:
-     - Goal creation card, dynamic Goal Dashboard with progress percentage and status badges.
-     - Linked tickets display `Goal #` and `依賴 #` tags.
-     - One-click advance button for active goals.
-     - Expanded DebugEpisode failure history on ticket cards.
-     - One-click delivery button for accepted tickets and achieved goals to merge run branches to mainline (`master`).
+     - Added `wb ui` and `wb serve` commands with host, port, and auto-browser launching.
+     - Registered `wb` command in `pyproject.toml` scripts for direct terminal access.
+  5. **Web UI & Direct User Usability**:
+     - Upgraded `src/company_workbench/ui_server.py` as official first-class UI module with `WORKBENCH_DB` env support.
+     - Zero-friction project creation, goal creation, ticket creation, runner selection (Fake / Codex / Claude), auto-debug episodes view, SHA-256 evidence verification gate, Josh acceptance, and 1-click delivery.
+     - One-click launcher `start-workbench.bat` for Windows users (double-click to auto-launch server and browser).
+     - One-click launcher `start-workbench.sh` for Linux/macOS users.
+     - Comprehensive `README.md` and `docs/USER_GUIDE.md` for end-users.
   6. **Native Multi-Model Runners & Process Hardening on Windows**:
      - Native `ClaudeCliRunner` integrated for Claude Code 2.1.260 (`claude.exe` direct invocation, `--dangerously-skip-permissions`, `--no-session-persistence`, JSON output).
      - Native `CodexCliRunner` with `node.exe <codex.js>` direct resolution bypassing Windows `.cmd` `%*` argument truncation.
@@ -35,12 +37,11 @@
      - Implemented `GitDeliveryAdapter` (`src/company_workbench/delivery.py`) with `merge_run_to_branch()`, `generate_patch()`, and `tag_delivery()`.
      - Enforces Invariant 9: Tickets must have `status == 'accepted'` with independent verification evidence before any merge to mainline or patch generation can occur.
      - Engine methods `deliver_ticket` and `deliver_goal` merge isolated run branches (`wb-run/<run_id>`) into mainline (`master`), generate patches, tag delivery milestones (`wb-delivery/<run_id>`), and append immutable audit log events (`delivery_completed`, `goal_delivered`).
-     - Fully wired into CLI (`wb ticket deliver`, `wb goal deliver`) and Web UI with one-click actions.
   9. **Phase 6: Production Packaging & Containerization**:
      - Multi-stage hardened `Dockerfile` (Python 3.13-slim, Node.js 20, Git, SQLite3, pre-installed wheel).
      - Production `docker-compose.yml` with container healthchecks, volume persistence (`/data`), and host workspace mounting (`/workspace`).
      - `.dockerignore` configured to eliminate cache leaks and isolate runtime dependencies.
 
 - Current Boundary & Hand-off Note:
-  - All core phases (1 through 6) of Company AI Workbench are fully delivered, hardened, and verified with 100% test coverage (127/127 PASS).
+  - All core phases (1 through 6) of Company AI Workbench are fully delivered, hardened, verified with 100% test coverage (128/128 PASS), and ready for direct end-user operation.
   - Out of scope / future extension: Desktop native PySide6 GUI and GitHub Enterprise cloud webhook integration.

@@ -1,4 +1,4 @@
-﻿# Company AI Workbench Production Container
+# Company AI Workbench Production Container
 FROM python:3.13-slim
 
 # Install system dependencies: Git, SQLite3, curl, Node.js (for multi-model runners)
@@ -44,5 +44,5 @@ EXPOSE 8088
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8088/ || exit 1
 
-# Launch Prototype Web UI & Engine Daemon
-CMD ["python", "prototype/ui_server.py", "--port", "8088", "--host", "0.0.0.0"]
+# Launch Web UI & Engine Daemon
+CMD ["wb", "ui", "--port", "8088", "--host", "0.0.0.0", "--no-browser"]

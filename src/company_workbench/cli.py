@@ -263,7 +263,28 @@ def main(argv: list[str] | None = None) -> int:
     # ── reconcile ─────────────────────────────────────────────────────────────
     commands.add_parser("reconcile")
 
+    # ── ui / dashboard ────────────────────────────────────────────────────────
+    ui_cmd = commands.add_parser("ui", help="Launch Company AI Workbench Web UI dashboard")
+    ui_cmd.add_argument("--host", default="127.0.0.1", help="Host address to bind (default: 127.0.0.1)")
+    ui_cmd.add_argument("--port", type=int, default=8088, help="Port to listen on (default: 8088)")
+    ui_cmd.add_argument("--no-browser", action="store_true", help="Do not automatically open web browser")
+
+    serve_cmd = commands.add_parser("serve", help="Alias for 'ui'")
+    serve_cmd.add_argument("--host", default="127.0.0.1", help="Host address to bind (default: 127.0.0.1)")
+    serve_cmd.add_argument("--port", type=int, default=8088, help="Port to listen on (default: 8088)")
+    serve_cmd.add_argument("--no-browser", action="store_true", help="Do not automatically open web browser")
+
     args = parser.parse_args(argv)
+
+    # ── ui / serve (no engine needed upfront) ─────────────────────────────────
+    if args.command in ("ui", "serve"):
+        from .ui_server import serve_ui
+        return serve_ui(
+            database=args.database,
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
 
     # ── demo (no engine needed) ───────────────────────────────────────────────
     if args.command == "demo":
