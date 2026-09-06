@@ -107,7 +107,15 @@ class SQLiteStore:
             connection.commit()
 
     @staticmethod
-    def _apply_v6(connection: sqlite3.Connection) -> None:
+    def _safe_add_column(connection: sqlite3.Connection, table: str, column_def: str) -> None:
+        try:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+
+    @classmethod
+    def _apply_v6(cls, connection: sqlite3.Connection) -> None:
         """Long tasks (goals) and ticket dependency hierarchy."""
         connection.executescript(
             """
@@ -124,12 +132,12 @@ class SQLiteStore:
         )
         ticket_columns = {row[1] for row in connection.execute("PRAGMA table_info(tickets)")}
         if ticket_columns and "goal_id" not in ticket_columns:
-            connection.execute("ALTER TABLE tickets ADD COLUMN goal_id TEXT REFERENCES goals(id)")
+            cls._safe_add_column(connection, "tickets", "goal_id TEXT REFERENCES goals(id)")
         if ticket_columns and "depends_on_ticket_id" not in ticket_columns:
-            connection.execute("ALTER TABLE tickets ADD COLUMN depends_on_ticket_id TEXT REFERENCES tickets(id)")
+            cls._safe_add_column(connection, "tickets", "depends_on_ticket_id TEXT REFERENCES tickets(id)")
 
-    @staticmethod
-    def _apply_v5(connection: sqlite3.Connection) -> None:
+    @classmethod
+    def _apply_v5(cls, connection: sqlite3.Connection) -> None:
         """Governance hardening: risk tiers, verifier independence, content-addressed evidence,
         run usage/cost, and memory expiry. Every addition is nullable or defaulted so v1-v4 rows
         survive unchanged; the only rebuild is memory_candidates, which needs a wider status CHECK.
@@ -141,9 +149,9 @@ class SQLiteStore:
         """
         ticket_columns = {row[1] for row in connection.execute("PRAGMA table_info(tickets)")}
         if ticket_columns and "risk_level" not in ticket_columns:
-            connection.execute(
-                "ALTER TABLE tickets ADD COLUMN risk_level TEXT NOT NULL DEFAULT 'high' "
-                "CHECK(risk_level IN ('low','medium','high'))"
+            cls._safe_add_column(
+                connection, "tickets",
+                "risk_level TEXT NOT NULL DEFAULT 'high' CHECK(risk_level IN ('low','medium','high'))"
             )
         run_columns = {row[1] for row in connection.execute("PRAGMA table_info(runs)")}
         for name, decl in (
@@ -151,11 +159,11 @@ class SQLiteStore:
             ("cost_usd", "REAL"), ("provider_account", "TEXT"),
         ):
             if run_columns and name not in run_columns:
-                connection.execute(f"ALTER TABLE runs ADD COLUMN {name} {decl}")
+                cls._safe_add_column(connection, "runs", f"{name} {decl}")
         verification_columns = {row[1] for row in connection.execute("PRAGMA table_info(verifications)")}
         for name in ("verifier_provider", "evidence_sha256"):
             if verification_columns and name not in verification_columns:
-                connection.execute(f"ALTER TABLE verifications ADD COLUMN {name} TEXT")
+                cls._safe_add_column(connection, "verifications", f"{name} TEXT")
         connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS evidence_artifacts (
