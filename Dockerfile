@@ -1,18 +1,48 @@
-FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
+﻿# Company AI Workbench Production Container
+FROM python:3.13-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+# Install system dependencies: Git, SQLite3, curl, Node.js (for multi-model runners)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    sqlite3 \
+    curl \
+    ca-certificates \
+    gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
+# Setup application directory and data mount points
 WORKDIR /app
+RUN mkdir -p /data /workspace
 
-# No pip dependencies (pyproject.toml declares none -- pure stdlib), so no install step.
-COPY src ./src
-COPY prototype ./prototype
+# Install project package
+COPY pyproject.toml /app/
+COPY src/ /app/src/
+COPY prototype/ /app/prototype/
 
-# .workbench/ (the SQLite DB) is volume-mounted in docker-compose, not baked into the image,
-# so real ticket/run/verification history survives container rebuilds.
-RUN mkdir -p /app/.workbench
+RUN pip install --no-cache-dir -e .
+
+# Configure Git default identity inside container
+RUN git config --global user.name "Workbench Daemon" \
+    && git config --global user.email "workbench@local.daemon" \
+    && git config --global commit.gpgsign false
+
+# Environment configuration
+ENV PYTHONUNBUFFERED=1
+ENV WORKBENCH_DB=/data/workbench.db
+ENV WORKBENCH_NODE_PATH=/usr/bin/node
+ENV PYTHONPATH=/app/src:/app/prototype
 
 EXPOSE 8088
 
-CMD ["python", "prototype/ui_server.py"]
+# Default healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8088/ || exit 1
+
+# Launch Prototype Web UI & Engine Daemon
+CMD ["python", "prototype/ui_server.py", "--port", "8088", "--host", "0.0.0.0"]

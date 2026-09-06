@@ -196,6 +196,14 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                         一鍵推進 (Advance Next Ticket - Fake)
                       </button>
                     </form>
+                    {f'''
+                    <form method="POST" action="/goal/deliver" class="inline-form" style="margin-left: 10px;">
+                      <input type="hidden" name="goal_id" value="{g['id']}">
+                      <button type="submit" class="btn btn-primary" style="background-color: #2ea44f; border-color: #2ea44f;">
+                        交付此目標至主分支 (Deliver)
+                      </button>
+                    </form>
+                    ''' if g_status == 'achieved' else ''}
                   </div>
                 </div>
                 """)
@@ -318,6 +326,12 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                         """)
                 elif status == "accepted":
                     actions.append(f'<span style="color: #28a745; font-weight: bold;">已由 {html.escape(tkt["accepted_by"] or "Josh")} 驗收結案</span>')
+                    actions.append(f"""
+                    <form method="POST" action="/ticket/deliver" class="inline-form" style="margin-left: 10px;">
+                      <input type="hidden" name="ticket_id" value="{tkt['id']}">
+                      <button type="submit" class="btn btn-primary" style="background-color: #2ea44f; border-color: #2ea44f;">交付至主分支 (Deliver)</button>
+                    </form>
+                    """)
 
                 criteria_list = "".join(f"<li>{html.escape(c)}</li>" for c in tkt["acceptance_criteria"])
                 
@@ -441,6 +455,17 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 engine.accept_ticket(ticket_id, accepted_by="Josh", note="Approved via Prototype UI")
                 msg = f"Ticket #{ticket_id} 已正式驗收通過！"
 
+            elif parsed.path == "/ticket/deliver":
+                ticket_id = get_val("ticket_id")
+                deliv_res = engine.deliver_ticket(ticket_id, repo_path=Path.cwd(), target_branch="master")
+                commit_short = deliv_res["delivery_result"]["commit_sha"][:8] if deliv_res["delivery_result"]["commit_sha"] else ""
+                msg = f"Ticket #{ticket_id} 已成功交付並合併至 master！(Commit: {commit_short})"
+
+            elif parsed.path == "/goal/deliver":
+                goal_id = get_val("goal_id")
+                goal_res = engine.deliver_goal(goal_id, repo_path=Path.cwd(), target_branch="master")
+                msg = f"Goal #{goal_id} 下所有工單已成功交付並合併至 master！"
+
         except Exception as exc:
             err = str(exc)
 
@@ -461,10 +486,14 @@ class PrototypeHandler(BaseHTTPRequestHandler):
 
 
 def run():
-    # 0.0.0.0 so this is reachable from outside the container when run under Docker
-    # (127.0.0.1 would only be reachable from inside the container's own network namespace).
-    server = HTTPServer(("0.0.0.0", PORT), PrototypeHandler)
-    print(f"Company AI Workbench Prototype UI running at http://localhost:{PORT}")
+    import argparse
+    parser = argparse.ArgumentParser(description="Company AI Workbench Web UI")
+    parser.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"), help="Host address to bind")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", PORT)), help="Port to listen on")
+    args, _ = parser.parse_known_args()
+
+    server = HTTPServer((args.host, args.port), PrototypeHandler)
+    print(f"Company AI Workbench Prototype UI running at http://{args.host}:{args.port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

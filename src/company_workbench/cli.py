@@ -19,11 +19,12 @@ from .errors import (
     VerifierIndependenceError,
     WorktreeError,
 )
+from .delivery import DeliveryError
 from .runner import CodexCliRunner
 
 _GOVERNANCE_ERRORS = (
     NotFoundError, InvalidTransitionError, EvidenceRequiredError, AcceptanceRequiredError,
-    VerifierIndependenceError, TicketImportError, WorktreeError, ValueError,
+    VerifierIndependenceError, TicketImportError, WorktreeError, DeliveryError, ValueError,
 )
 
 
@@ -103,6 +104,11 @@ def main(argv: list[str] | None = None) -> int:
     tkt_show.add_argument("ticket_id")
     tkt_list = tkt_sub.add_parser("list")
     tkt_list.add_argument("project_id")
+    tkt_deliver = tkt_sub.add_parser("deliver", help="Deliver an accepted Ticket to mainline branch (Invariant 9)")
+    tkt_deliver.add_argument("ticket_id")
+    tkt_deliver.add_argument("--repo", default=".", help="Repository path (default: current directory)")
+    tkt_deliver.add_argument("--branch", default="master", help="Target mainline branch (default: master)")
+    tkt_deliver.add_argument("--no-tag", action="store_true", help="Do not create delivery tag")
 
     # ── goal ──────────────────────────────────────────────────────────────────
     goal_cmd = commands.add_parser("goal", help="Manage long-task Goals")
@@ -135,6 +141,11 @@ def main(argv: list[str] | None = None) -> int:
     goal_adv.add_argument("--cwd", default=".", help="Working directory / repo root for execution")
     goal_adv.add_argument("--no-worktree", action="store_true", help="Disable git worktree isolation")
     goal_adv.add_argument("--no-auto-accept", action="store_true", help="Disable automated acceptance of low-risk tickets")
+
+    goal_deliver = goal_sub.add_parser("deliver", help="Deliver all accepted tickets in a Goal to mainline branch (Invariant 9)")
+    goal_deliver.add_argument("goal_id")
+    goal_deliver.add_argument("--repo", default=".", help="Repository path (default: current directory)")
+    goal_deliver.add_argument("--branch", default="master", help="Target mainline branch (default: master)")
 
     # ── run ───────────────────────────────────────────────────────────────────
     run_cmd = commands.add_parser("run")
@@ -321,6 +332,13 @@ def main(argv: list[str] | None = None) -> int:
                 _out(engine.get_ticket(args.ticket_id))
             elif args.tkt_action == "list":
                 _out(engine.list_tickets(args.project_id))
+            elif args.tkt_action == "deliver":
+                _out(engine.deliver_ticket(
+                    args.ticket_id,
+                    repo_path=Path(args.repo).resolve(),
+                    target_branch=args.branch,
+                    tag=not args.no_tag,
+                ))
         except _GOVERNANCE_ERRORS as exc:
             return _err(str(exc))
         return 0
@@ -365,6 +383,12 @@ def main(argv: list[str] | None = None) -> int:
                     auto_accept_low_risk=not args.no_auto_accept,
                 )
                 _out(res)
+            elif args.goal_action == "deliver":
+                _out(engine.deliver_goal(
+                    args.goal_id,
+                    repo_path=Path(args.repo).resolve(),
+                    target_branch=args.branch,
+                ))
         except _GOVERNANCE_ERRORS as exc:
             return _err(str(exc))
         return 0

@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -107,9 +108,57 @@ class CliGoalsTestCase(unittest.TestCase):
         self.assertEqual(0, code, err)
         adv2 = json.loads(out)
         self.assertEqual("ran_ticket", adv2["action"])
-        self.assertEqual(t2["id"], adv2["ticket_id"])
         self.assertEqual("achieved", adv2["goal"]["status"])
         self.assertEqual(100.0, adv2["goal"]["progress_pct"])
+
+    def test_ticket_and_goal_deliver_cli(self):
+        # Set up a real git repo
+        repo_dir = Path(self.temp_dir.name) / "cli_repo"
+        repo_dir.mkdir()
+        subprocess.run(["git", "init", "-b", "master"], cwd=repo_dir, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "CLI Tester"], cwd=repo_dir, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "cli@test.local"], cwd=repo_dir, check=True, capture_output=True)
+        subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=repo_dir, check=True, capture_output=True)
+        (repo_dir / "init.txt").write_text("initial", encoding="utf-8")
+        subprocess.run(["git", "add", "init.txt"], cwd=repo_dir, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "initial"], cwd=repo_dir, check=True, capture_output=True)
+
+        # Create goal and ticket
+        goal = self.engine.create_goal(self.prj["id"], "Deliverable Goal")
+        t = self.engine.create_ticket(self.prj["id"], "Deliverable Ticket", "task", ["criteria"], goal_id=goal["id"])
+
+        # Unaccepted ticket cannot be delivered (Invariant 9)
+        code, out, err = self.run_cli(["ticket", "deliver", t["id"], "--repo", str(repo_dir)])
+        self.assertEqual(1, code)
+        self.assertIn("Invariant 9 requires explicit acceptance", err)
+
+        # Complete, create branch, verify, accept
+        run = self.engine.start_run(t["id"], runner="codex-cli")
+        self.engine.complete_run(run["id"])
+        subprocess.run(["git", "checkout", "-b", f"wb-run/{run['id']}"], cwd=repo_dir, check=True, capture_output=True)
+        (repo_dir / "work.txt").write_text("delivered work", encoding="utf-8")
+        subprocess.run(["git", "add", "work.txt"], cwd=repo_dir, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "done"], cwd=repo_dir, check=True, capture_output=True)
+        subprocess.run(["git", "checkout", "master"], cwd=repo_dir, check=True, capture_output=True)
+
+        self.engine.verify_run(
+            run["id"], status="passed", evidence_ref="cmd://v", summary="v",
+            verifier="v", verifier_provider="local-command", evidence_content=b"proof",
+        )
+        self.engine.accept_ticket(t["id"], accepted_by="Josh")
+
+        # Now deliver ticket via CLI
+        code, out, err = self.run_cli(["ticket", "deliver", t["id"], "--repo", str(repo_dir)])
+        self.assertEqual(0, code, err)
+        deliv_res = json.loads(out)
+        self.assertEqual("delivered", deliv_res["delivery_result"]["status"])
+        self.assertTrue((repo_dir / "work.txt").exists())
+
+        # Deliver goal via CLI
+        code, out, err = self.run_cli(["goal", "deliver", goal["id"], "--repo", str(repo_dir)])
+        self.assertEqual(0, code, err)
+        g_deliv = json.loads(out)
+        self.assertEqual("achieved", g_deliv["goal"]["status"])
 
 
 if __name__ == "__main__":

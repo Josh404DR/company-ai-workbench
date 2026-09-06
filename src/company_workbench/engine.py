@@ -1577,3 +1577,109 @@ class WorkbenchEngine:
             "loop_result": loop_result,
         }
 
+    # -------------------------------------------------------------------------
+    # Delivery Adapters (Invariant 9: Acceptance vs Delivery)
+    # -------------------------------------------------------------------------
+
+    def deliver_ticket(
+        self,
+        ticket_id: str,
+        repo_path: str | Path,
+        *,
+        target_branch: str = "master",
+        delivery_adapter: Any | None = None,
+        tag: bool = True,
+    ) -> dict[str, Any]:
+        """Deliver an accepted Ticket's work into the target mainline branch (Invariant 9).
+        Enforces:
+        1. Ticket must be in 'accepted' status (cannot deliver unaccepted code).
+        2. Finds the latest Run for this ticket that produced an auditable wb-run/<run_id> branch.
+        3. Merges the run branch into target_branch.
+        4. Records a 'delivery_completed' audit event.
+        """
+        ticket = self.get_ticket(ticket_id)
+        if ticket["status"] != "accepted":
+            raise InvalidTransitionError(
+                f"Ticket {ticket_id} is in status '{ticket['status']}', cannot be delivered. "
+                f"Invariant 9 requires explicit acceptance before mainline delivery."
+            )
+
+        with self.store.connect() as db:
+            run_row = db.execute(
+                "SELECT * FROM runs WHERE ticket_id=? AND status='completed' ORDER BY rowid DESC LIMIT 1",
+                (ticket_id,),
+            ).fetchone()
+        if not run_row:
+            raise NotFoundError(f"No completed run found for ticket {ticket_id}")
+
+        run_id = run_row["id"]
+        from .delivery import GitDeliveryAdapter, DeliveryResult
+        adapter = delivery_adapter or GitDeliveryAdapter(repo_path)
+        result: DeliveryResult = adapter.merge_run_to_branch(
+            run_id,
+            target_branch=target_branch,
+            commit_message=f"feat({ticket_id}): {ticket['title']}\n\nAccepted by: {ticket.get('accepted_by')}\nRun: {run_id}",
+        )
+
+        tag_name = None
+        if result.status == "delivered" and tag and result.commit_sha:
+            tag_name = f"wb-delivered-{ticket_id.lower()}"
+            try:
+                adapter.tag_delivery(
+                    result.commit_sha,
+                    tag_name,
+                    message=f"Delivered ticket {ticket_id} from run {run_id}\nTarget branch: {target_branch}",
+                )
+            except Exception:
+                tag_name = None
+
+        payload = {
+            "ticket_id": ticket_id,
+            "run_id": run_id,
+            "target_branch": target_branch,
+            "delivery_result": result.to_dict(),
+            "tag": tag_name,
+        }
+        with self.store.transaction() as db:
+            self._append_event(db, run_id, "delivery_completed", payload)
+
+        return payload
+
+    def deliver_goal(
+        self,
+        goal_id: str,
+        repo_path: str | Path,
+        *,
+        target_branch: str = "master",
+        delivery_adapter: Any | None = None,
+    ) -> dict[str, Any]:
+        """Deliver all accepted tickets under a Goal into the target mainline branch (Invariant 9)."""
+        goal = self.get_goal(goal_id)
+        tickets = goal["tickets"]
+        if not tickets:
+            raise ValueError(f"Goal {goal_id} contains no tickets")
+        if not all(t["status"] == "accepted" for t in tickets):
+            raise InvalidTransitionError(
+                f"Goal {goal_id} cannot be delivered because not all tickets are accepted."
+            )
+
+        results = []
+        for ticket in tickets:
+            res = self.deliver_ticket(ticket["id"], repo_path, target_branch=target_branch, delivery_adapter=delivery_adapter)
+            results.append(res)
+
+        now = _now()
+        payload = {
+            "goal_id": goal_id,
+            "target_branch": target_branch,
+            "ticket_deliveries": results,
+        }
+        with self.store.transaction() as db:
+            db.execute("UPDATE goals SET status='achieved', updated_at=? WHERE id=?", (now, goal_id))
+            self._append_event(db, results[-1]["run_id"], "goal_delivered", payload)
+
+        return {
+            "goal": self.get_goal(goal_id),
+            "ticket_deliveries": results,
+        }
+
