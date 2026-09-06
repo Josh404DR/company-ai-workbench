@@ -1,4 +1,4 @@
-﻿"""
+"""
 AgentOS Living Mind Map & Structured Workflow Pipeline Generator.
 Renders an intuitive, hierarchical Left-to-Right workflow pipeline and node-centric dialogue surface.
 Addresses scattered connection graph with structured stage levels, focus filters, and workflow steppers.
@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 def get_agentos_graph_data():
-    """Extract grounded node graph from E:\Workspace\agentos-lite with explicit Workflow levels."""
+    r"""Extract grounded node graph from E:\Workspace\agentos-lite with explicit Workflow levels."""
     nodes = [
         # --- Level 1: 階段一：專案輸入與治理憲法 (Governance & Project Ingestion) ---
         {
@@ -360,7 +360,7 @@ def render_agentos_mindmap_html():
 
     /* 左側節點脈絡與對話抽屜 */
     .node-drawer {{
-      width: 420px;
+      width: 480px;
       background: var(--panel-bg);
       border-right: 1px solid var(--border);
       display: flex;
@@ -368,72 +368,111 @@ def render_agentos_mindmap_html():
       z-index: 5;
     }}
     .drawer-header {{
-      padding: 16px 20px;
+      padding: 14px 18px;
       border-bottom: 1px solid var(--border);
       display: flex;
       justify-content: space-between;
       align-items: center;
     }}
     .drawer-content {{
-      padding: 20px;
+      padding: 16px 18px;
       overflow-y: auto;
-      flex: 1;
+      max-height: 220px;
+      border-bottom: 1px solid var(--border);
     }}
     .node-title {{
-      font-size: 17px;
+      font-size: 16px;
       color: var(--text-bright);
-      margin-bottom: 8px;
+      margin-bottom: 6px;
       display: flex;
       align-items: center;
       gap: 8px;
     }}
     .section-title {{
-      font-size: 12px;
+      font-size: 11px;
       text-transform: uppercase;
       color: #8b949e;
       font-weight: 700;
-      margin-top: 16px;
-      margin-bottom: 6px;
+      margin-top: 10px;
+      margin-bottom: 4px;
       letter-spacing: 0.5px;
     }}
     .code-box {{
       background: var(--bg);
-      padding: 8px 12px;
+      padding: 6px 10px;
       border-radius: 6px;
       border: 1px solid var(--border);
-      font-size: 12px;
+      font-size: 11px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       color: #79c0ff;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
     }}
 
     /* 節點對話視窗 (Chat Surface) */
     .chat-section {{
-      background: var(--bg);
-      border-top: 1px solid var(--border);
-      padding: 16px 20px;
-    }}
-    .chat-prompt-chips {{
+      background: var(--panel-bg);
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      margin-bottom: 12px;
+      flex: 1;
+      padding: 14px 18px;
+      overflow: hidden;
     }}
-    .prompt-chip {{
+    .chat-history {{
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: #0d1117;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      margin-bottom: 10px;
+      min-height: 200px;
+    }}
+    .chat-bubble {{
+      max-width: 92%;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 12.5px;
+      line-height: 1.5;
+      word-break: break-word;
+    }}
+    .bubble-user {{
+      align-self: flex-end;
+      background: #1f6feb;
+      color: #fff;
+      border-bottom-right-radius: 2px;
+    }}
+    .bubble-assistant {{
+      align-self: flex-start;
+      background: #161b22;
+      border: 1px solid #30363d;
+      color: var(--text-bright);
+      border-bottom-left-radius: 2px;
+    }}
+    .action-grid {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 8px;
+    }}
+    .action-btn {{
       background: var(--card-bg);
       border: 1px solid var(--border);
       color: var(--text-bright);
-      padding: 6px 10px;
+      padding: 7px 10px;
       border-radius: 6px;
       font-size: 12px;
+      font-weight: 600;
       cursor: pointer;
-      text-align: left;
+      text-align: center;
       transition: all 0.15s;
     }}
-    .prompt-chip:hover {{
+    .action-btn:hover {{
       background: #30363d;
       border-color: var(--orange);
-      transform: translateX(3px);
+      transform: translateY(-1px);
     }}
     .chat-input-row {{
       display: flex;
@@ -509,25 +548,26 @@ def render_agentos_mindmap_html():
   <!-- 頂部導航 -->
   <div class="top-bar">
     <div class="brand">
-      <h1>AgentOS 工作流脈絡圖</h1>
+      <h1>🚗 日產精工裝配駕駛艙 <span style="font-size:12px;color:#8b949e;font-weight:normal;">| AgentOS-Lite</span></h1>
+      <span class="badge" style="background:rgba(63,185,80,0.2);color:#3fb950;border:1px solid #3fb950;">🟢 產線暢通 · 零公差防護</span>
     </div>
 
     <!-- 5 階段結構化工作流導覽條 (Pipeline Stepper) -->
     <div class="workflow-stepper">
-      <div class="step-item" onclick="focusStage(1)">1. 治理與憲章</div>
+      <div class="step-item" onclick="focusStage(1)">1. 治理與憲法</div>
       <span class="step-arrow">➜</span>
-      <div class="step-item" onclick="focusStage(2)">2. 契約檢驗門禁</div>
+      <div class="step-item" onclick="focusStage(2)">2. 零件檢驗門禁</div>
       <span class="step-arrow">➜</span>
-      <div class="step-item active" onclick="focusStage(3)">3. 任務封包流水線</div>
+      <div class="step-item active" onclick="focusStage(3)">3. 任務封包裝配</div>
       <span class="step-arrow">➜</span>
-      <div class="step-item" onclick="focusStage(4)">4. 沙盒與驗證</div>
+      <div class="step-item" onclick="focusStage(4)">4. 沙盒極限試車</div>
       <span class="step-arrow">➜</span>
-      <div class="step-item" onclick="focusStage(5)">5. 主管交付結案</div>
+      <div class="step-item" onclick="focusStage(5)">5. 廠長最終驗收</div>
     </div>
 
     <div class="top-actions">
       <button class="btn" onclick="fitNetwork()">居中視角</button>
-      <a href="/" class="btn btn-primary">返回主控制台</a>
+      <a href="/classic" class="btn" style="color:#8b949e;">經典後台</a>
     </div>
   </div>
 
@@ -537,12 +577,12 @@ def render_agentos_mindmap_html():
     <div class="node-drawer">
       <div class="drawer-header">
         <span class="badge badge-path" id="drawer-layer-badge">階段三：任務流水線</span>
-        <span style="font-size: 11px; color:#8b949e;">點擊任一節點聚焦</span>
+        <span style="font-size: 11px; color:#8b949e;">點擊任一工位切換</span>
       </div>
       
       <div class="drawer-content">
         <h2 class="node-title" id="drawer-node-title">🔥 N4: 探索真實工單 (當前焦點 / No-Go)</h2>
-        <p style="font-size: 13px; line-height: 1.6; color: #8b949e;" id="drawer-node-summary">
+        <p style="font-size: 12px; line-height: 1.5; color: #8b949e;" id="drawer-node-summary">
           【當前工作流核心卡點】：N4 探索性工單因 Task Packet 未授權 Verifier 產物且扁平 expected_outputs 導致 LINT-007 漏檢，被判定 NO-GO。
         </p>
 
@@ -553,27 +593,35 @@ def render_agentos_mindmap_html():
         </div>
 
         <div class="section-title">底層細節與記憶脈絡</div>
-        <div style="font-size: 13px; line-height: 1.5; color: #c9d1d9; background: var(--card-bg); padding: 12px; border-radius: 6px; border:1px solid var(--border);" id="drawer-node-details">
+        <div style="font-size: 12px; line-height: 1.4; color: #c9d1d9; background: var(--card-bg); padding: 10px; border-radius: 6px; border:1px solid var(--border);" id="drawer-node-details">
           這就是我們的工作流起點！N4 的教訓指明了：扁平路徑無法涵蓋深層驗證，必須升級為階層式約束，並由 Workbench 的 Worktree 沙盒與 Auto-Debug 進行重生修復。
         </div>
       </div>
 
       <!-- 節點對話視窗 (Chat Surface) -->
       <div class="chat-section">
-        <div class="section-title" style="margin-top:0;">從此節點出發討論 (Node Dialogue)</div>
-        <div class="chat-prompt-chips" id="dialogue-chips">
-          <button class="prompt-chip" onclick="simulateChat('深入分析 N4 為什麼被判定 No-Go？')">
-            💡 深入分析 N4 為什麼被判定 No-Go？
-          </button>
-          <button class="prompt-chip" onclick="simulateChat('如何修復 LINT-007 缺失的階層驗證？')">
-            💡 如何修復 LINT-007 缺失的階層驗證？
-          </button>
-          <button class="prompt-chip" onclick="simulateChat('在 Workbench 開立修復 Ticket，啟動自動除錯迴圈')">
-            ⚡ 在 Workbench 開立修復 Ticket，啟動自動除錯迴圈
-          </button>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div class="section-title" style="margin:0;">💬 精工對話與工令流水</div>
+          <span style="font-size:11px; color:#58a6ff;">● 即時連線 Engine</span>
         </div>
+
+        <div class="chat-history" id="chat-history">
+          <div class="chat-bubble bubble-assistant">
+            🚗 <strong>日產精工裝配駕駛艙已就緒。</strong><br>
+            當前鎖定工位：<strong style="color:#f0883e;" id="chat-active-node-name">N4: 探索真實工單</strong>。<br>
+            你可以點擊下方快捷工令，或直接於下方發送對話指令。
+          </div>
+        </div>
+
+        <div class="action-grid">
+          <button class="action-btn" onclick="sendChat('⚡ 啟動沙盒測試')">⚡ 啟動沙盒測試</button>
+          <button class="action-btn" onclick="sendChat('🛠️ 在此工位開立工單')">🛠️ 在此工位開立工單</button>
+          <button class="action-btn" onclick="sendChat('🔍 診斷此工位阻斷點')">🔍 診斷此工位阻斷點</button>
+          <button class="action-btn" onclick="sendChat('🚢 提交 Josh 驗收結案')">🚢 提交 Josh 驗收結案</button>
+        </div>
+
         <div class="chat-input-row">
-          <input type="text" class="chat-input" id="chat-input-field" placeholder="針對此節點輸入你的問題或指令...">
+          <input type="text" class="chat-input" id="chat-input-field" placeholder="下達工令 (例如：修復 expected_outputs)..." onkeydown="if(event.key==='Enter')handleSendChat()">
           <button class="btn btn-primary" onclick="handleSendChat()">發送</button>
         </div>
       </div>
@@ -697,28 +745,58 @@ def render_agentos_mindmap_html():
       }}
     }});
 
+    let activeNode = rawNodes.find(n => n.id === 'task_n4') || rawNodes[0];
+
     function updateDrawer(node) {{
+      activeNode = node;
       document.getElementById('drawer-node-title').innerText = node.label;
       document.getElementById('drawer-node-summary').innerText = node.summary;
       document.getElementById('drawer-node-details').innerText = node.details;
       document.getElementById('drawer-layer-badge').innerText = node.layer;
+      const activeNameEl = document.getElementById('chat-active-node-name');
+      if (activeNameEl) activeNameEl.innerText = node.label;
 
       const filesContainer = document.getElementById('drawer-node-files');
-      filesContainer.innerHTML = node.files.map(f => `<div class="code-box">📄 ${{f}}</div>`).join('');
+      filesContainer.innerHTML = (node.files || []).map(f => `<div class="code-box">📄 ${{f}}</div>`).join('');
+    }}
 
-      // 動態更新對話快捷按鈕
-      const chipsContainer = document.getElementById('dialogue-chips');
-      chipsContainer.innerHTML = `
-        <button class="prompt-chip" onclick="simulateChat('針對 [${{node.label}}] 進行架構依賴檢查')">
-          💡 針對 [${{node.label}}] 進行架構依賴檢查
-        </button>
-        <button class="prompt-chip" onclick="simulateChat('分析 [${{node.label}}] 在 Workflow 中的上下游阻斷點')">
-          💡 分析 [${{node.label}}] 在 Workflow 中的上下游阻斷點
-        </button>
-        <button class="prompt-chip" onclick="simulateChat('在此節點建立修復 Ticket 並啟動 Worktree 沙盒執行')">
-          ⚡ 在此節點建立修復 Ticket 並啟動 Worktree 沙盒執行
-        </button>
-      `;
+    async function sendChat(text) {{
+      if (!text) return;
+      const history = document.getElementById('chat-history');
+
+      // Append user bubble
+      const userBubble = document.createElement('div');
+      userBubble.className = 'chat-bubble bubble-user';
+      userBubble.innerText = text;
+      history.appendChild(userBubble);
+
+      // Append temporary assistant bubble
+      const assistantBubble = document.createElement('div');
+      assistantBubble.className = 'chat-bubble bubble-assistant';
+      assistantBubble.innerHTML = '<span style="color:#8b949e;">⚙️ 引擎裝配中...</span>';
+      history.appendChild(assistantBubble);
+      history.scrollTop = history.scrollHeight;
+
+      try {{
+        const res = await fetch('/api/chat', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{
+            message: text,
+            node_id: activeNode.id,
+            node_title: activeNode.label
+          }})
+        }});
+        const data = await res.json();
+        const formatted = (data.reply || '已收到工令。')
+          .replace(/\\n/g, '<br>')
+          .replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>')
+          .replace(/`([^`]+)`/g, '<code style="color:#79c0ff;background:#0d1117;padding:1px 4px;border-radius:3px;">$1</code>');
+        assistantBubble.innerHTML = formatted;
+      }} catch (err) {{
+        assistantBubble.innerHTML = `<span style="color:#f85149;">❌ 工令執行出錯: ${{err.message}}</span>`;
+      }}
+      history.scrollTop = history.scrollHeight;
     }}
 
     function setMode(mode) {{
@@ -763,18 +841,12 @@ def render_agentos_mindmap_html():
       network.fit({{ animation: {{ duration: 500 }} }});
     }}
 
-    function simulateChat(text) {{
-      const input = document.getElementById('chat-input-field');
-      input.value = text;
-      handleSendChat();
-    }}
-
     function handleSendChat() {{
       const input = document.getElementById('chat-input-field');
       const val = input.value.trim();
       if (!val) return;
-      alert(`💬 【從節點出發的對話已觸發】\n\n指令: "${{val}}"\n\n系統已將此節點設為工作流起點，並在後端加載對應的代碼與記憶契約！`);
       input.value = '';
+      sendChat(val);
     }}
 
     // 初始化自動居中聚焦在 N4

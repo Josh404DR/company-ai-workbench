@@ -55,9 +55,20 @@ class UiServerTestCase(unittest.TestCase):
         conn.close()
         return res.status, resp_body, resp_headers
 
+    def request_json(self, path: str, data: dict) -> tuple[int, dict]:
+        import json
+        conn = http.client.HTTPConnection("127.0.0.1", self.port)
+        body = json.dumps(data)
+        headers = {"Content-Type": "application/json"}
+        conn.request("POST", path, body=body, headers=headers)
+        res = conn.getresponse()
+        resp_data = json.loads(res.read().decode("utf-8"))
+        conn.close()
+        return res.status, resp_data
+
     def test_ui_renders_and_handles_goals(self):
-        # 1. GET / initial load
-        status, body, _ = self.request("GET", "/")
+        # 1. GET /classic initial load
+        status, body, _ = self.request("GET", "/classic")
         self.assertEqual(200, status)
         self.assertIn("長任務目標看板 (Goals)", body)
         self.assertIn("目前沒有長任務 Goal", body)
@@ -71,8 +82,8 @@ class UiServerTestCase(unittest.TestCase):
         self.assertEqual(303, status)
         self.assertIn("Location", headers)
 
-        # Verify Goal in GET
-        status, body, _ = self.request("GET", "/")
+        # Verify Goal in GET /classic
+        status, body, _ = self.request("GET", "/classic")
         self.assertEqual(200, status)
         self.assertIn("UI Goal 1", body)
 
@@ -97,8 +108,8 @@ class UiServerTestCase(unittest.TestCase):
         })
         self.assertEqual(303, status)
 
-        # 5. Check updated goal progress in GET
-        status, body, _ = self.request("GET", "/")
+        # 5. Check updated goal progress in GET /classic
+        status, body, _ = self.request("GET", "/classic")
         self.assertEqual(200, status)
         self.assertIn("完成進度: <strong>100.0%</strong>", body)
         self.assertIn("achieved", body)
@@ -112,16 +123,16 @@ class UiServerTestCase(unittest.TestCase):
         prjs = self.engine.list_projects(self.ws["id"])
         self.assertEqual(2, len(prjs))
 
-        # 7. Check / redirect message handling
-        status, body, _ = self.request("GET", "/?msg=TestSuccess")
+        # 7. Check /classic redirect message handling
+        status, body, _ = self.request("GET", "/classic?msg=TestSuccess")
         self.assertEqual(200, status)
         self.assertIn("TestSuccess", body)
 
     def test_ui_mindmap_and_nodes_sync(self):
-        # 1. GET /agentos-map renders living mind map
-        status, body, _ = self.request("GET", "/agentos-map")
+        # 1. GET / renders precision cockpit by default
+        status, body, _ = self.request("GET", "/")
         self.assertEqual(200, status)
-        self.assertIn("AgentOS-Lite 結構化工作流與心智圖譜", body)
+        self.assertIn("日產精工裝配駕駛艙", body)
         self.assertIn("Tier 0~4 分層治理憲法", body)
 
         # 2. POST /nodes/sync-agentos populates SQLite nodes
@@ -144,11 +155,40 @@ class UiServerTestCase(unittest.TestCase):
         })
         self.assertEqual(303, status)
 
-        # 4. GET / displays ticket with node badge
-        status, body, _ = self.request("GET", "/")
+        # 4. GET /classic displays ticket with node badge
+        status, body, _ = self.request("GET", "/classic")
         self.assertEqual(200, status)
         self.assertIn(f"Node #{target_node['id']}", body)
         self.assertIn("驗證 LINT 門禁", body)
+
+    def test_ui_precision_cockpit_and_api_chat(self):
+        # 1. Test chat sandbox verification
+        status, data = self.request_json("/api/chat", {
+            "message": "⚡ 啟動沙盒測試",
+            "node_id": "task_n4",
+        })
+        self.assertEqual(200, status)
+        self.assertEqual("verified", data["action"])
+        self.assertIn("極限試車沙盒驗證通過", data["reply"])
+        self.assertIn("SHA-256", data["reply"])
+
+        # 2. Test chat create ticket
+        status, data = self.request_json("/api/chat", {
+            "message": "🛠️ 在此工位開立工單",
+            "node_id": "task_n4",
+        })
+        self.assertEqual(200, status)
+        self.assertEqual("ticket_created", data["action"])
+        self.assertIn("日產精工工單已建立", data["reply"])
+
+        # 3. Test chat diagnose
+        status, data = self.request_json("/api/chat", {
+            "message": "🔍 診斷此工位阻斷點",
+            "node_id": "task_n4",
+        })
+        self.assertEqual(200, status)
+        self.assertEqual("diagnosed", data["action"])
+        self.assertIn("工位精密診斷報告", data["reply"])
 
 
 if __name__ == "__main__":
