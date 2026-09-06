@@ -222,10 +222,55 @@ class WorkbenchEngine:
         )
         try:
             with self.store.transaction() as db:
+                self._validate_goal_and_dependency(
+                    db, project_id, item["id"], goal_id, depends_on_ticket_id
+                )
                 self._insert_ticket(db, item)
         except sqlite3.IntegrityError as error:
             raise NotFoundError(f"Project not found: {project_id}") from error
         return self.get_ticket(item["id"])
+
+    @staticmethod
+    def _validate_goal_and_dependency(
+        db: sqlite3.Connection,
+        project_id: str,
+        ticket_id: str | None,
+        goal_id: str | None,
+        depends_on_ticket_id: str | None,
+    ) -> None:
+        if depends_on_ticket_id and not goal_id:
+            raise ValueError("Ticket dependencies require a Goal; goal_id is mandatory when depends_on_ticket_id is specified")
+
+        if goal_id:
+            goal = db.execute("SELECT * FROM goals WHERE id=?", (goal_id,)).fetchone()
+            if not goal:
+                raise NotFoundError(f"Goal not found: {goal_id}")
+            if goal["project_id"] != project_id:
+                raise ValueError("Ticket and Goal must belong to the same Project")
+
+        if depends_on_ticket_id:
+            dep = db.execute("SELECT * FROM tickets WHERE id=?", (depends_on_ticket_id,)).fetchone()
+            if not dep:
+                raise NotFoundError(f"Dependency Ticket not found: {depends_on_ticket_id}")
+            if ticket_id and dep["id"] == ticket_id:
+                raise ValueError("Ticket cannot depend on itself")
+            if dep["project_id"] != project_id:
+                raise ValueError("Dependency Ticket must belong to the same Project")
+            if goal_id and dep["goal_id"] != goal_id:
+                raise ValueError("Dependency Ticket must belong to the same Goal")
+
+            # Detect dependency cycles (e.g. A -> B -> A)
+            if ticket_id:
+                visited = {ticket_id, dep["id"]}
+                curr_dep_id = dep["depends_on_ticket_id"]
+                while curr_dep_id:
+                    if curr_dep_id == ticket_id:
+                        raise ValueError(f"Circular dependency detected between ticket {ticket_id} and {depends_on_ticket_id}")
+                    if curr_dep_id in visited:
+                        break
+                    visited.add(curr_dep_id)
+                    curr_row = db.execute("SELECT depends_on_ticket_id FROM tickets WHERE id=?", (curr_dep_id,)).fetchone()
+                    curr_dep_id = curr_row["depends_on_ticket_id"] if curr_row else None
 
     @staticmethod
     def _ticket_row(
@@ -395,6 +440,7 @@ class WorkbenchEngine:
         verification_command: str | None = None,
         provider_account: str | None = None,
         keep_worktree: bool = False,
+        auto_accept: bool = True,
     ) -> dict[str, Any]:
         """Route a Ticket through the verified Runner boundary and record its full lifecycle.
 
@@ -403,7 +449,7 @@ class WorkbenchEngine:
         product survives as auditable git history without leaving directories behind.
         """
         ticket = self.get_ticket(ticket_id)
-        if ticket["status"] not in {"ready", "verification"}:
+        if ticket["status"] != "ready":
             raise InvalidTransitionError(f"Ticket {ticket_id} cannot start from {ticket['status']}")
 
         run_id = _id("RUN")
@@ -456,7 +502,7 @@ class WorkbenchEngine:
                 current = db.execute("SELECT status FROM tickets WHERE id=?", (ticket_id,)).fetchone()
                 if not current:
                     raise NotFoundError(f"Ticket not found: {ticket_id}")
-                if current["status"] not in {"ready", "verification"}:
+                if current["status"] != "ready":
                     raise InvalidTransitionError(f"Ticket {ticket_id} cannot start from {current['status']}")
                 db.execute(
                     """INSERT INTO runs(id,ticket_id,runner,status,started_at,created_at,invocation_id,pid)
@@ -487,6 +533,7 @@ class WorkbenchEngine:
             provider_account=provider_account,
             runner_label=model or runner_name,
             keep_worktree=keep_worktree,
+            auto_accept=auto_accept,
         )
         return self.get_run(run["id"])
 
@@ -501,6 +548,7 @@ class WorkbenchEngine:
         provider_account: str | None = None,
         runner_label: str | None = None,
         keep_worktree: bool = False,
+        auto_accept: bool = True,
     ) -> dict[str, Any]:
         now = _now()
         verification_result = None
@@ -574,7 +622,7 @@ class WorkbenchEngine:
                             evidence_content=evidence_bytes, builder_runner=run["runner"], automated=True,
                         )
                         ticket = db.execute("SELECT * FROM tickets WHERE id=?", (run["ticket_id"],)).fetchone()
-                        if ticket["risk_level"] == "low" and AUTO_ACCEPTOR in self.acceptance_authority["low"]:
+                        if auto_accept and ticket["risk_level"] == "low" and AUTO_ACCEPTOR in self.acceptance_authority["low"]:
                             self._insert_acceptance(
                                 db, ticket, run, verification, accepted_by=AUTO_ACCEPTOR,
                                 note=f"Automated low-risk acceptance on {verification['id']}", automated=True,
@@ -1294,17 +1342,9 @@ class WorkbenchEngine:
             ticket = db.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
             if not ticket:
                 raise NotFoundError(f"Ticket not found: {ticket_id}")
-            goal = db.execute("SELECT * FROM goals WHERE id=?", (goal_id,)).fetchone()
-            if not goal:
-                raise NotFoundError(f"Goal not found: {goal_id}")
-            if ticket["project_id"] != goal["project_id"]:
-                raise ValueError("Ticket and Goal must belong to the same Project")
-            if depends_on_ticket_id:
-                dep = db.execute("SELECT * FROM tickets WHERE id=?", (depends_on_ticket_id,)).fetchone()
-                if not dep:
-                    raise NotFoundError(f"Dependency Ticket not found: {depends_on_ticket_id}")
-                if dep["id"] == ticket_id:
-                    raise ValueError("Ticket cannot depend on itself")
+            self._validate_goal_and_dependency(
+                db, ticket["project_id"], ticket_id, goal_id, depends_on_ticket_id
+            )
             now = _now()
             db.execute(
                 "UPDATE tickets SET goal_id=?, depends_on_ticket_id=?, updated_at=? WHERE id=?",
@@ -1326,6 +1366,28 @@ class WorkbenchEngine:
             return ticket
         return None
 
+    def claim_next_runnable_ticket_for_goal(self, goal_id: str) -> dict[str, Any] | None:
+        """Find the next runnable ticket for a goal, ensuring no active runs exist."""
+        with self.store.transaction() as db:
+            goal = db.execute("SELECT * FROM goals WHERE id=?", (goal_id,)).fetchone()
+            if not goal or goal["status"] in ("achieved", "cancelled"):
+                return None
+            tickets = db.execute("SELECT * FROM tickets WHERE goal_id=? ORDER BY created_at", (goal_id,)).fetchall()
+            status_map = {t["id"]: t["status"] for t in tickets}
+            for ticket in tickets:
+                if ticket["status"] != "ready":
+                    continue
+                active_run = db.execute(
+                    "SELECT 1 FROM runs WHERE ticket_id=? AND status IN ('queued', 'running')", (ticket["id"],)
+                ).fetchone()
+                if active_run:
+                    continue
+                dep_id = ticket["depends_on_ticket_id"]
+                if dep_id and status_map.get(dep_id) != "accepted":
+                    continue
+                return self.get_ticket(ticket["id"])
+        return None
+
     # -------------------------------------------------------------------------
     # Short Tasks: Ticket-internal Auto-Debug Loop
     # -------------------------------------------------------------------------
@@ -1343,6 +1405,7 @@ class WorkbenchEngine:
         timeout_seconds: float = 300.0,
         model: str | None = None,
         sensitive_values: Sequence[str] = (),
+        auto_accept_low_risk: bool = True,
     ) -> dict[str, Any]:
         """Execute a Ticket with an internal auto-debug retry loop.
         If a Run or its verification fails, diagnostics are captured, a DebugEpisode
@@ -1369,6 +1432,7 @@ class WorkbenchEngine:
                 model=model,
                 sensitive_values=sensitive_values,
                 keep_worktree=False,
+                auto_accept=auto_accept_low_risk,
             )
             last_run = run
 
@@ -1459,7 +1523,7 @@ class WorkbenchEngine:
         if goal["status"] in ("achieved", "cancelled"):
             return {"goal": goal, "action": "noop", "message": f"Goal is already {goal['status']}"}
 
-        next_ticket = self.get_next_runnable_ticket_for_goal(goal_id)
+        next_ticket = self.claim_next_runnable_ticket_for_goal(goal_id)
         if not next_ticket:
             all_accepted = all(t["status"] == "accepted" for t in goal["tickets"])
             new_status = "achieved" if (all_accepted and len(goal["tickets"]) > 0) else goal["status"]
@@ -1494,6 +1558,7 @@ class WorkbenchEngine:
             verification_command=verification_command,
             max_attempts=max_attempts_per_ticket,
             isolate_worktree=isolate_worktree,
+            auto_accept_low_risk=auto_accept_low_risk,
         )
 
         # Refresh goal progress

@@ -92,6 +92,9 @@ def main(argv: list[str] | None = None) -> int:
     tkt_create.add_argument("--criteria", action="append", dest="criteria", required=True, metavar="TEXT")
     tkt_create.add_argument("--risk", dest="risk_level", choices=RISK_LEVELS, default="high",
                             help="Acceptance tier; fixed at creation (default: high = Josh only)")
+    tkt_create.add_argument("--goal-id", default=None, help="Link ticket to an existing Goal")
+    tkt_create.add_argument("--depends-on", dest="depends_on_ticket_id", default=None,
+                            help="Predecessor Ticket ID that must be accepted first")
     tkt_import = tkt_sub.add_parser("import", help="Batch-create Tickets from a JSON or Markdown file (all-or-nothing)")
     tkt_import.add_argument("project_id")
     tkt_import.add_argument("file", type=Path)
@@ -100,6 +103,38 @@ def main(argv: list[str] | None = None) -> int:
     tkt_show.add_argument("ticket_id")
     tkt_list = tkt_sub.add_parser("list")
     tkt_list.add_argument("project_id")
+
+    # ── goal ──────────────────────────────────────────────────────────────────
+    goal_cmd = commands.add_parser("goal", help="Manage long-task Goals")
+    goal_sub = goal_cmd.add_subparsers(dest="goal_action", required=True)
+    goal_create = goal_sub.add_parser("create", help="Create a new Goal")
+    goal_create.add_argument("project_id")
+    goal_create.add_argument("title")
+    goal_create.add_argument("--desc", default="", help="Goal description")
+
+    goal_list = goal_sub.add_parser("list", help="List Goals for a Project")
+    goal_list.add_argument("project_id")
+
+    goal_show = goal_sub.add_parser("show", help="Show Goal details and progress")
+    goal_show.add_argument("goal_id")
+
+    goal_link = goal_sub.add_parser("link", help="Link a Ticket to a Goal")
+    goal_link.add_argument("ticket_id")
+    goal_link.add_argument("goal_id")
+    goal_link.add_argument("--depends-on", dest="depends_on_ticket_id", default=None,
+                           help="Optional predecessor Ticket ID that must be accepted first")
+
+    goal_adv = goal_sub.add_parser("advance", help="Advance a Goal by executing the next unblocked ticket")
+    goal_adv.add_argument("goal_id")
+    goal_adv.add_argument("--runner", choices=["codex", "claude", "fake"], default="codex",
+                          help="Runner for execution (default: codex)")
+    goal_adv.add_argument("--model", default=None, help="Model override (e.g. gpt-5.5)")
+    goal_adv.add_argument("--verify-cmd", required=True, metavar="CMD",
+                          help="Automated test/check command to run for verification")
+    goal_adv.add_argument("--max-attempts", type=int, default=3, help="Max auto-debug attempts per ticket (default: 3)")
+    goal_adv.add_argument("--cwd", default=".", help="Working directory / repo root for execution")
+    goal_adv.add_argument("--no-worktree", action="store_true", help="Disable git worktree isolation")
+    goal_adv.add_argument("--no-auto-accept", action="store_true", help="Disable automated acceptance of low-risk tickets")
 
     # ── run ───────────────────────────────────────────────────────────────────
     run_cmd = commands.add_parser("run")
@@ -114,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
                             help="Record a Run done directly in this session (e.g. by an interactive Claude Code "
                                  "agent), not through a managed subprocess Runner. Starts the Run under the given "
                                  "label; pair with a later `wb run complete` once the work is done.")
-    run_start.add_argument("--runner", choices=["gemini", "codex"], default="gemini",
+    run_start.add_argument("--runner", choices=["gemini", "codex", "claude"], default="gemini",
                            help="Runner to execute prompt with (default: gemini)")
     run_start.add_argument("--model", default=None, metavar="MODEL",
                            help="Model override (e.g. gemini-2.5-flash or gpt-4o)")
@@ -226,7 +261,11 @@ def main(argv: list[str] | None = None) -> int:
         _out(result)
         return 0
 
-    authority = TIERED_ACCEPTANCE_AUTHORITY if getattr(args, "auto_accept_low_risk", False) else None
+    enable_auto_accept = (
+        getattr(args, "auto_accept_low_risk", False) or
+        (args.command == "goal" and not getattr(args, "no_auto_accept", False))
+    )
+    authority = TIERED_ACCEPTANCE_AUTHORITY if enable_auto_accept else None
     engine = WorkbenchEngine(args.database, acceptance_authority=authority)
 
     # ── utility ───────────────────────────────────────────────────────────────
@@ -270,13 +309,62 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "ticket":
         try:
             if args.tkt_action == "create":
-                _out(engine.create_ticket(args.project_id, args.title, args.goal, args.criteria, risk_level=args.risk_level))
+                _out(engine.create_ticket(
+                    args.project_id, args.title, args.goal, args.criteria,
+                    risk_level=args.risk_level,
+                    goal_id=args.goal_id,
+                    depends_on_ticket_id=args.depends_on_ticket_id,
+                ))
             elif args.tkt_action == "import":
                 _out(engine.import_tickets(args.project_id, args.file, default_risk_level=args.default_risk))
             elif args.tkt_action == "show":
                 _out(engine.get_ticket(args.ticket_id))
             elif args.tkt_action == "list":
                 _out(engine.list_tickets(args.project_id))
+        except _GOVERNANCE_ERRORS as exc:
+            return _err(str(exc))
+        return 0
+
+    # ── goal ──────────────────────────────────────────────────────────────────
+    if args.command == "goal":
+        try:
+            if args.goal_action == "create":
+                _out(engine.create_goal(args.project_id, args.title, description=args.desc))
+            elif args.goal_action == "list":
+                _out(engine.list_goals(args.project_id))
+            elif args.goal_action == "show":
+                _out(engine.get_goal(args.goal_id))
+            elif args.goal_action == "link":
+                _out(engine.link_ticket_to_goal(args.ticket_id, args.goal_id, depends_on_ticket_id=args.depends_on_ticket_id))
+            elif args.goal_action == "advance":
+                if args.runner == "fake":
+                    class _FakeProcessHandle:
+                        pid = 999
+                        def wait(self, **kwargs):
+                            from .runner import ProcessResult
+                            return ProcessResult(0, '{"ok":true}', pid=999)
+                    class _FakeRunner:
+                        def start_invocation(self, prompt, cwd, **kwargs):
+                            from .runner import RunnerInvocation
+                            return RunnerInvocation(_FakeProcessHandle(), timeout_seconds=60, max_output_chars=4000, cancel_event=None, sensitive_values=())
+                    runner = _FakeRunner()
+                elif args.runner == "claude":
+                    from .runner import ClaudeCliRunner
+                    runner = ClaudeCliRunner(executable="claude.cmd" if sys.platform == "win32" else "claude", default_model=args.model)
+                else:
+                    runner = CodexCliRunner(executable="codex.cmd" if sys.platform == "win32" else "codex", default_model=args.model)
+
+                target_cwd = Path(args.cwd).resolve()
+                res = engine.advance_goal(
+                    args.goal_id,
+                    runner=runner,
+                    cwd=target_cwd,
+                    verification_command=args.verify_cmd,
+                    max_attempts_per_ticket=args.max_attempts,
+                    isolate_worktree=not args.no_worktree,
+                    auto_accept_low_risk=not args.no_auto_accept,
+                )
+                _out(res)
         except _GOVERNANCE_ERRORS as exc:
             return _err(str(exc))
         return 0
@@ -303,8 +391,11 @@ def main(argv: list[str] | None = None) -> int:
                     if args.runner == "gemini":
                         from .gemini_runner import GeminiRunner
                         runner = GeminiRunner(model=args.model or "gemini-2.5-flash")
+                    elif args.runner == "claude":
+                        from .runner import ClaudeCliRunner
+                        runner = ClaudeCliRunner(executable="claude.cmd" if sys.platform == "win32" else "claude", default_model=args.model)
                     else:
-                        runner = CodexCliRunner()
+                        runner = CodexCliRunner(executable="codex.cmd" if sys.platform == "win32" else "codex", default_model=args.model)
                     cwd = Path.cwd()
                     print(f"Starting managed run for ticket {args.ticket_id} (runner: {runner_name}) ...", file=sys.stderr)
                     result = engine.start_managed_run(

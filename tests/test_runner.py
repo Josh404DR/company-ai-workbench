@@ -5,7 +5,7 @@ import unittest
 import sys
 from pathlib import Path
 
-from company_workbench.runner import CodexCliRunner, ProcessResult, SubprocessExecutor
+from company_workbench.runner import CodexCliRunner, ClaudeCliRunner, ProcessResult, SubprocessExecutor
 
 
 class FakeExecutor:
@@ -223,6 +223,46 @@ class CodexCliRunnerTestCase(unittest.TestCase):
             timer.cancel()
         self.assertTrue(result.cancelled)
         self.assertLess(time.monotonic() - started, 3)
+
+
+class ClaudeCliRunnerTestCase(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.cwd = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_builds_fixed_argv(self):
+        executor = FakeExecutor(ProcessResult(0, '{"result":"ok","usage":{"input_tokens":10,"output_tokens":5}}', pid=42))
+        runner = ClaudeCliRunner(executor=executor)
+        res = runner.run("hello claude", cwd=self.cwd)
+        argv, options = executor.calls[0]
+        self.assertEqual(
+            ("claude", "-p", "hello claude", "--dangerously-skip-permissions", "--no-session-persistence", "--output-format", "json"),
+            argv,
+        )
+        self.assertEqual("completed", res.outcome)
+        self.assertEqual({"input_tokens": 10, "output_tokens": 5}, res.usage)
+
+    def test_default_model_and_override(self):
+        executor = FakeExecutor(ProcessResult(0, '{"result":"ok"}', pid=42))
+        runner = ClaudeCliRunner(executor=executor, default_model="claude-sonnet-5")
+        runner.run("work", cwd=self.cwd)
+        argv, _ = executor.calls[0]
+        self.assertIn("--model", argv)
+        self.assertEqual("claude-sonnet-5", argv[argv.index("--model") + 1])
+
+        # Explicit override
+        runner.run("work override", cwd=self.cwd, model="claude-haiku-4.5")
+        argv_ov, _ = executor.calls[1]
+        self.assertEqual("claude-haiku-4.5", argv_ov[argv_ov.index("--model") + 1])
+
+    def test_rejects_unallowlisted_executable(self):
+        with self.assertRaises(ValueError):
+            ClaudeCliRunner("bash")
+        with self.assertRaises(ValueError):
+            ClaudeCliRunner(str(self.cwd / "claude.exe"))
 
 
 if __name__ == "__main__":

@@ -281,6 +281,87 @@ class GoalsAndAutoDebugTestCase(unittest.TestCase):
         self.assertEqual("achieved", adv_final["goal"]["status"])
         self.assertEqual(100.0, adv_final["goal"]["progress_pct"])
 
+    def test_link_ticket_prevents_cycles_and_cross_goal_dependency(self):
+        goal1 = self.engine.create_goal(self.project["id"], "Goal 1")
+        goal2 = self.engine.create_goal(self.project["id"], "Goal 2")
+        t1 = self.engine.create_ticket(self.project["id"], "T1", "g1", ["c1"], goal_id=goal1["id"])
+        t2 = self.engine.create_ticket(self.project["id"], "T2", "g2", ["c2"], goal_id=goal1["id"])
+        t3 = self.engine.create_ticket(self.project["id"], "T3", "g3", ["c3"], goal_id=goal2["id"])
+
+        # Cross-goal dependency rejected
+        with self.assertRaises(ValueError):
+            self.engine.link_ticket_to_goal(t1["id"], goal1["id"], depends_on_ticket_id=t3["id"])
+
+        # Self-dependency rejected
+        with self.assertRaises(ValueError):
+            self.engine.link_ticket_to_goal(t1["id"], goal1["id"], depends_on_ticket_id=t1["id"])
+
+        # Valid link: t2 depends on t1
+        self.engine.link_ticket_to_goal(t2["id"], goal1["id"], depends_on_ticket_id=t1["id"])
+
+        # Circular dependency rejected: t1 cannot depend on t2
+        with self.assertRaises(ValueError):
+            self.engine.link_ticket_to_goal(t1["id"], goal1["id"], depends_on_ticket_id=t2["id"])
+
+        # 3-node circular dependency rejected: t3 depends on t2 (t1 -> t2 -> t3), so t1 cannot depend on t3
+        t3_same_goal = self.engine.create_ticket(self.project["id"], "T3_same", "g3", ["c3"], goal_id=goal1["id"])
+        self.engine.link_ticket_to_goal(t3_same_goal["id"], goal1["id"], depends_on_ticket_id=t2["id"])
+        with self.assertRaises(ValueError):
+            self.engine.link_ticket_to_goal(t1["id"], goal1["id"], depends_on_ticket_id=t3_same_goal["id"])
+
+    def test_advance_goal_honors_auto_accept_low_risk_false(self):
+        goal = self.engine.create_goal(self.project["id"], "Manual Review Low Risk Goal")
+        ticket = self.engine.create_ticket(
+            self.project["id"], "Low Risk Ticket", "low task", ["criteria"],
+            goal_id=goal["id"], risk_level="low",
+        )
+        executor = SequenceExecutor([ProcessResult(0, "completed task", pid=1001)])
+        runner = CodexCliRunner(executor=executor)
+        cmd = f'"{sys.executable}" -c "exit(0)"'
+
+        adv = self.engine.advance_goal(
+            goal["id"], runner, self.temp.name,
+            verification_command=cmd, isolate_worktree=False,
+            auto_accept_low_risk=False,
+        )
+        self.assertEqual("ran_ticket", adv["action"])
+        self.assertTrue(adv["loop_result"]["success"])
+
+        # When auto_accept_low_risk=False, low risk ticket must NOT be auto-accepted!
+        t_after = self.engine.get_ticket(ticket["id"])
+        self.assertEqual("verification", t_after["status"])
+        self.assertIsNone(t_after["accepted_by"])
+
+    def test_create_ticket_prevents_cycles_and_cross_goal_dependency(self):
+        goal1 = self.engine.create_goal(self.project["id"], "Goal 1")
+        goal2 = self.engine.create_goal(self.project["id"], "Goal 2")
+        t1 = self.engine.create_ticket(self.project["id"], "T1", "g1", ["c1"], goal_id=goal1["id"])
+
+        # Cross-goal dependency rejected on creation
+        t_other = self.engine.create_ticket(self.project["id"], "TOther", "go", ["co"], goal_id=goal2["id"])
+        with self.assertRaises(ValueError):
+            self.engine.create_ticket(
+                self.project["id"], "TBadCross", "gb", ["cb"],
+                goal_id=goal1["id"], depends_on_ticket_id=t_other["id"],
+            )
+
+        # Cross-project dependency rejected on creation
+        ws2 = self.engine.create_workspace("WS2")
+        p2 = self.engine.create_project(ws2["id"], "P2")
+        t_p2 = self.engine.create_ticket(p2["id"], "TP2", "gp2", ["cp2"])
+        with self.assertRaises(ValueError):
+            self.engine.create_ticket(
+                self.project["id"], "TBadProj", "gb", ["cb"],
+                goal_id=goal1["id"], depends_on_ticket_id=t_p2["id"],
+            )
+
+        # Valid creation with dependency
+        t2 = self.engine.create_ticket(
+            self.project["id"], "T2", "g2", ["c2"],
+            goal_id=goal1["id"], depends_on_ticket_id=t1["id"],
+        )
+        self.assertEqual(t1["id"], t2["depends_on_ticket_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

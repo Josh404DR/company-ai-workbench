@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Protocol, Sequence
 
 
-_ALLOWED_EXECUTABLES = {"codex", "codex.exe", "codex.cmd"}
+_ALLOWED_EXECUTABLES = {
+    "codex", "codex.exe", "codex.cmd",
+    "claude", "claude.exe", "claude.cmd",
+}
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[^\s]+"),
     re.compile(r"(?i)((?:api[_-]?key|token|password|secret)\s*[=:]\s*)[^\r\n]+"),
@@ -98,6 +101,26 @@ class ProcessHandle:
         )
 
 
+def _resolve_trusted_node(cwd: Path | None = None) -> Path | None:
+    configured = os.environ.get("WORKBENCH_NODE_PATH")
+    if configured:
+        p = Path(configured).resolve()
+        if p.is_file():
+            return p
+    for env_var in ("ProgramFiles", "ProgramFiles(x86)"):
+        pf = os.environ.get(env_var)
+        if pf:
+            cand = Path(pf) / "nodejs" / "node.exe"
+            if cand.is_file():
+                return cand
+    node_which = shutil.which("node")
+    if node_which:
+        p = Path(node_which).resolve()
+        if p.is_file() and (cwd is None or not p.is_relative_to(cwd.resolve())):
+            return p
+    return None
+
+
 class SubprocessExecutor:
     def start(self, argv: Sequence[str], *, cwd: Path) -> ProcessHandle:
         stdout_file = tempfile.TemporaryFile("w+b")
@@ -112,15 +135,20 @@ class SubprocessExecutor:
             target_path = Path(exe_target)
             if target_path.suffix.lower() in (".cmd", ".bat"):
                 # On Windows, npm global .cmd scripts lose multiline args in %*.
-                # If the backing JS entry point exists under node_modules, invoke node directly.
+                # If the backing binary or JS entry point exists under node_modules, invoke directly.
                 stem = target_path.stem.lower()
-                js_candidate = target_path.parent / "node_modules" / "@openai" / stem / "bin" / f"{stem}.js"
-                if not js_candidate.exists():
-                    js_candidate = target_path.parent / "node_modules" / stem / "bin" / f"{stem}.js"
-                if js_candidate.exists() and shutil.which("node"):
-                    resolved_argv = ["node", str(js_candidate)] + resolved_argv[1:]
+                claude_binary = target_path.parent / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+                if stem == "claude" and claude_binary.exists():
+                    resolved_argv[0] = str(claude_binary)
                 else:
-                    resolved_argv[0] = str(target_path)
+                    js_candidate = target_path.parent / "node_modules" / "@openai" / stem / "bin" / f"{stem}.js"
+                    if not js_candidate.exists():
+                        js_candidate = target_path.parent / "node_modules" / stem / "bin" / f"{stem}.js"
+                    node_resolved = _resolve_trusted_node(cwd)
+                    if js_candidate.exists() and node_resolved:
+                        resolved_argv = [str(node_resolved), str(js_candidate)] + resolved_argv[1:]
+                    else:
+                        resolved_argv[0] = str(target_path)
             else:
                 resolved_argv[0] = str(target_path)
         try:
@@ -217,6 +245,87 @@ class CodexCliRunner:
         if effective_model:
             argv += ["-m", effective_model]
         argv.append(prompt)
+        return workdir, tuple(argv)
+
+    def run(
+        self,
+        prompt: str,
+        *,
+        cwd: str | Path,
+        timeout_seconds: float = 300,
+        max_output_chars: int = 32_000,
+        cancel_event: threading.Event | None = None,
+        sensitive_values: Sequence[str] = (),
+        model: str | None = None,
+    ) -> RunnerResult:
+        workdir, argv = self._build_invocation(prompt, cwd, timeout_seconds, max_output_chars, model)
+        result = self.executor.execute(
+            argv, cwd=workdir, timeout_seconds=timeout_seconds, cancel_event=cancel_event
+        )
+        return _classify(result, max_output_chars, sensitive_values)
+
+    def start_invocation(
+        self,
+        prompt: str,
+        *,
+        cwd: str | Path,
+        timeout_seconds: float = 300,
+        max_output_chars: int = 32_000,
+        cancel_event: threading.Event | None = None,
+        sensitive_values: Sequence[str] = (),
+        model: str | None = None,
+    ) -> RunnerInvocation:
+        workdir, argv = self._build_invocation(prompt, cwd, timeout_seconds, max_output_chars, model)
+        handle = self.executor.start(argv, cwd=workdir)
+        return RunnerInvocation(
+            handle,
+            timeout_seconds=timeout_seconds,
+            max_output_chars=max_output_chars,
+            cancel_event=cancel_event,
+            sensitive_values=sensitive_values,
+        )
+
+
+class ClaudeCliRunner:
+    def __init__(
+        self,
+        executable: str = "claude",
+        executor: ProcessExecutor | None = None,
+        default_model: str | None = None,
+        tools: str | None = None,
+    ):
+        if executable.lower() not in _ALLOWED_EXECUTABLES or Path(executable).name != executable:
+            raise ValueError("Claude executable is not allowlisted")
+        self.executable = executable
+        self.executor = executor or SubprocessExecutor()
+        self.default_model = default_model or os.environ.get("CLAUDE_MODEL")
+        self.tools = tools
+
+    def _build_invocation(
+        self, prompt: str, cwd: str | Path, timeout_seconds: float, max_output_chars: int,
+        model: str | None = None,
+    ) -> tuple[Path, tuple[str, ...]]:
+        workdir = Path(cwd).resolve()
+        if not workdir.is_dir():
+            raise ValueError("Runner cwd must be an existing directory")
+        if not prompt.strip() or "\x00" in prompt:
+            raise ValueError("Runner prompt must be non-empty and contain no NUL")
+        if not 1 <= timeout_seconds <= 3600:
+            raise ValueError("Runner timeout must be between 1 and 3600 seconds")
+        if not 256 <= max_output_chars <= 1_000_000:
+            raise ValueError("Runner output limit must be between 256 and 1000000 characters")
+        argv: list[str] = [
+            self.executable,
+            "-p", prompt,
+            "--dangerously-skip-permissions",
+            "--no-session-persistence",
+            "--output-format", "json",
+        ]
+        if self.tools is not None:
+            argv += ["--tools", self.tools]
+        effective_model = model or self.default_model
+        if effective_model:
+            argv += ["--model", effective_model]
         return workdir, tuple(argv)
 
     def run(

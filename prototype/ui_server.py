@@ -1,4 +1,4 @@
-﻿"""
+"""
 Throwaway UI Prototype for Company AI Workbench.
 Pure Python standard library (http.server), zero external dependencies, zero npm build.
 """
@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from company_workbench.engine import WorkbenchEngine
+from company_workbench.engine import WorkbenchEngine, TIERED_ACCEPTANCE_AUTHORITY
 from company_workbench.errors import (
     NotFoundError,
     InvalidTransitionError,
@@ -27,7 +27,7 @@ PORT = 8088
 
 
 def get_engine() -> WorkbenchEngine:
-    return WorkbenchEngine(DB_PATH)
+    return WorkbenchEngine(DB_PATH, acceptance_authority=TIERED_ACCEPTANCE_AUTHORITY)
 
 
 def render_html(body: str, message: str = "", error: str = "") -> str:
@@ -73,7 +73,7 @@ def render_html(body: str, message: str = "", error: str = "") -> str:
     <div class="header">
       <div>
         <h1>Company AI Workbench <span style="font-size: 14px; font-weight: normal; color: #586069;">Prototype UI</span></h1>
-        <div style="font-size: 12px; color: #586069;">零前端依賴・直讀 SQLite・SSR 極簡無坑</div>
+        <div style="font-size: 12px; color: #586069;">零前端依賴 - 直讀 SQLite - SSR 極簡無坑</div>
       </div>
       <div>
         <a href="/" class="btn btn-secondary">重新整理</a>
@@ -110,9 +110,102 @@ class PrototypeHandler(BaseHTTPRequestHandler):
 
         prj_options = "".join(f'<option value="{p["id"]}">{html.escape(p["name"])} ({p["id"]})</option>' for p in all_projects)
 
+        # Collect all goals for dropdown
+        all_goals = []
+        for prj in all_projects:
+            all_goals.extend(engine.list_goals(prj["id"]))
+        goal_options = '<option value="">(無 - 獨立工單)</option>' + "".join(
+            f'<option value="{g["id"]}">{html.escape(g["title"])} ({g["status"]})</option>' for g in all_goals
+        )
+
+        # Collect all tickets for dependency dropdown
+        all_tickets_list = []
+        for prj in all_projects:
+            all_tickets_list.extend(engine.list_tickets(prj["id"]))
+        ticket_dep_options = '<option value="">(無 - 無前置依賴)</option>' + "".join(
+            f'<option value="{t["id"]}">#{t["id"]} - {html.escape(t["title"])} ({t["status"]})</option>' for t in all_tickets_list
+        )
+
+        # ── Goal Creation Card ──
+        content.append(f"""
+        <div class="card" style="border-top: 4px solid #6f42c1;">
+          <h2>建立長任務目標 (Goal)</h2>
+          <form method="POST" action="/goal/create">
+            <div style="display: flex; gap: 10px;">
+              <div class="form-group" style="flex: 1;">
+                <label>所屬專案</label>
+                <select name="project_id">{prj_options}</select>
+              </div>
+              <div class="form-group" style="flex: 2;">
+                <label>Goal 目標標題</label>
+                <input type="text" name="title" required placeholder="例如：新版會員系統重構 (長任務)">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>目標詳細敘述</label>
+              <input type="text" name="description" placeholder="此目標需經多階段工單循序完成">
+            </div>
+            <button type="submit" class="btn btn-purple">建立長任務 Goal</button>
+          </form>
+        </div>
+        """)
+
+        # ── Goals Dashboard ──
+        content.append("<h2>長任務目標看板 (Goals)</h2>")
+        if all_goals:
+            for g in all_goals:
+                g_detail = engine.get_goal(g["id"])
+                pct = g_detail["progress_pct"]
+                g_status = g_detail["status"]
+                badge_class = "accepted" if g_status == "achieved" else ("active" if g_status == "in_progress" else "ready")
+                
+                # Goal tickets list
+                g_tkts = g_detail.get("tickets", [])
+                tkt_rows = ""
+                if g_tkts:
+                    tkt_rows = '<div style="margin-top: 8px; font-size: 13px;"><strong>包含工單：</strong><ul style="margin: 4px 0; padding-left: 20px;">'
+                    for gt in g_tkts:
+                        dep_text = f" (依賴 #{gt['depends_on_ticket_id']})" if gt.get("depends_on_ticket_id") else ""
+                        tkt_rows += f"<li>#{gt['id']} {html.escape(gt['title'])} - <span class='badge badge-{gt['status']}'>{gt['status']}</span>{dep_text}</li>"
+                    tkt_rows += "</ul></div>"
+
+                content.append(f"""
+                <div class="card" style="border-left: 4px solid #6f42c1;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3>{html.escape(g_detail['title'])} <span style="font-size: 13px; color: #586069;">#{g_detail['id']}</span></h3>
+                    <span class="badge badge-{badge_class}">{g_status}</span>
+                  </div>
+                  <p style="margin: 4px 0 8px 0; color: #586069;">{html.escape(g_detail['description'] or '無詳細說明')}</p>
+                  
+                  <div style="margin: 8px 0;">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                      <span>完成進度: <strong>{pct}%</strong> ({g_detail['accepted_tickets']}/{g_detail['total_tickets']} 工單已驗收)</span>
+                    </div>
+                    <div style="background: #e1e4e8; border-radius: 6px; height: 10px; overflow: hidden;">
+                      <div style="background: #2ea44f; height: 100%; width: {pct}%;"></div>
+                    </div>
+                  </div>
+
+                  {tkt_rows}
+
+                  <div style="margin-top: 12px;">
+                    <form method="POST" action="/goal/advance" class="inline-form">
+                      <input type="hidden" name="goal_id" value="{g_detail['id']}">
+                      <input type="hidden" name="runner" value="fake">
+                      <button type="submit" class="btn btn-warning" {"disabled style='opacity:0.5;cursor:not-allowed;'" if g_status == 'achieved' else ""}>
+                        一鍵推進 (Advance Next Ticket - Fake)
+                      </button>
+                    </form>
+                  </div>
+                </div>
+                """)
+        else:
+            content.append('<div class="card" style="text-align: center; color: #586069;">目前沒有長任務 Goal。</div>')
+
+        # ── Ticket Creation Card ──
         content.append(f"""
         <div class="card">
-          <h2>開立 Ticket</h2>
+          <h2>開立 Ticket (短任務)</h2>
           <form method="POST" action="/ticket/create">
             <div style="display: flex; gap: 10px;">
               <div class="form-group" style="flex: 1;">
@@ -122,6 +215,23 @@ class PrototypeHandler(BaseHTTPRequestHandler):
               <div class="form-group" style="flex: 2;">
                 <label>Ticket 標題</label>
                 <input type="text" name="title" required placeholder="例如：實作登入 API">
+              </div>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <div class="form-group" style="flex: 1;">
+                <label>所屬長任務 (Goal，可選)</label>
+                <select name="goal_id">{goal_options}</select>
+              </div>
+              <div class="form-group" style="flex: 1;">
+                <label>前置依賴工單 (可選)</label>
+                <select name="depends_on_ticket_id">{ticket_dep_options}</select>
+              </div>
+              <div class="form-group" style="flex: 1;">
+                <label>風險等級</label>
+                <select name="risk_level">
+                  <option value="high" selected>High (Josh 人工簽核)</option>
+                  <option value="low">Low (測試通過可自動驗收)</option>
+                </select>
               </div>
             </div>
             <div class="form-group">
@@ -154,7 +264,15 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 if runs:
                     runs_html = '<div style="margin-top: 10px; font-size: 12px;"><strong>歷史 Runs:</strong><br>'
                     for r in runs:
-                        runs_html += f"• <code>{r['id']}</code> ({r['runner']}) - <strong>{r['status']}</strong> ({r['started_at'][:19]})<br>"
+                        runs_html += f"• <code>{r['id']}</code> ({r['runner']}) - <strong>{r['status']}</strong> ({r['started_at'][:19]})"
+                        # Check for debug episodes
+                        with engine.store.connect() as db:
+                            episodes = db.execute("SELECT * FROM debug_episodes WHERE run_id=?", (r["id"],)).fetchall()
+                        if episodes:
+                            runs_html += f" <span style='color:#f66a0a;'>(歷經 {len(episodes)} 次自動除錯重試)</span>"
+                            for ep in episodes:
+                                runs_html += f"<div style='margin-left: 15px; color:#586069; font-size: 11px;'>⤷ {html.escape(ep['symptom'])}</div>"
+                        runs_html += "<br>"
                     runs_html += "</div>"
 
                 actions = []
@@ -203,11 +321,18 @@ class PrototypeHandler(BaseHTTPRequestHandler):
 
                 criteria_list = "".join(f"<li>{html.escape(c)}</li>" for c in tkt["acceptance_criteria"])
                 
+                goal_tag = f"<span class='badge' style='background:#f3e8fd;color:#6f42c1;'>Goal #{tkt['goal_id']}</span> " if tkt.get("goal_id") else ""
+                dep_tag = f"<span class='badge' style='background:#fff0f5;color:#d73a49;'>依賴 #{tkt['depends_on_ticket_id']}</span> " if tkt.get("depends_on_ticket_id") else ""
+                risk_tag = f"<span class='badge' style='background:#f1f8ff;color:#0366d6;'>Risk: {tkt.get('risk_level','high')}</span> "
+
                 content.append(f"""
                 <div class="card ticket {status}">
                   <div style="display: flex; justify-content: space-between; align-items: center;">
                     <h3>{html.escape(tkt['title'])} <span style="font-size: 13px; color: #586069;">#{tkt['id']}</span></h3>
-                    <span class="badge badge-{status}">{status}</span>
+                    <div>
+                      {goal_tag}{dep_tag}{risk_tag}
+                      <span class="badge badge-{status}">{status}</span>
+                    </div>
                   </div>
                   <p style="margin: 4px 0 8px 0; color: #444;"><strong>目標:</strong> {html.escape(tkt['goal'])}</p>
                   <div style="font-size: 13px; color: #586069;">
@@ -243,13 +368,52 @@ class PrototypeHandler(BaseHTTPRequestHandler):
         err = ""
 
         try:
-            if parsed.path == "/ticket/create":
+            if parsed.path == "/goal/create":
+                prj_id = get_val("project_id")
+                title = get_val("title")
+                desc = get_val("description")
+                goal = engine.create_goal(prj_id, title, description=desc)
+                msg = f"成功建立長任務 Goal #{goal['id']}"
+
+            elif parsed.path == "/goal/advance":
+                goal_id = get_val("goal_id")
+                class _FakeProcessHandle:
+                    pid = 999
+                    def wait(self, **kwargs):
+                        from company_workbench.runner import ProcessResult
+                        return ProcessResult(0, '{"ok":true}', pid=999)
+                class _FakeRunner:
+                    def start_invocation(self, prompt, cwd, **kwargs):
+                        from company_workbench.runner import RunnerInvocation
+                        return RunnerInvocation(_FakeProcessHandle(), timeout_seconds=60, max_output_chars=4000, cancel_event=None, sensitive_values=())
+                
+                verify_cmd = f'"{sys.executable}" -c "exit(0)"'
+                res = engine.advance_goal(
+                    goal_id,
+                    runner=_FakeRunner(),
+                    cwd=Path.cwd(),
+                    verification_command=verify_cmd,
+                    isolate_worktree=False,
+                    auto_accept_low_risk=True,
+                )
+                if res["action"] == "ran_ticket":
+                    msg = f"已推進 Goal #{goal_id}，執行工單 #{res['ticket_id']} (進度: {res['goal']['progress_pct']}%)"
+                else:
+                    msg = f"Goal #{goal_id} 推進狀態: {res['action']} (當前進度: {res['goal']['progress_pct']}%)"
+
+            elif parsed.path == "/ticket/create":
                 prj_id = get_val("project_id")
                 title = get_val("title")
                 goal = get_val("goal")
                 raw_crit = get_val("criteria")
+                goal_id = get_val("goal_id") or None
+                dep_id = get_val("depends_on_ticket_id") or None
+                risk = get_val("risk_level", "high")
                 criteria = [c.strip() for c in raw_crit.split("\n") if c.strip()]
-                tkt = engine.create_ticket(prj_id, title, goal, criteria)
+                tkt = engine.create_ticket(
+                    prj_id, title, goal, criteria,
+                    risk_level=risk, goal_id=goal_id, depends_on_ticket_id=dep_id,
+                )
                 msg = f"成功建立 Ticket #{tkt['id']}"
 
             elif parsed.path == "/run/start":
