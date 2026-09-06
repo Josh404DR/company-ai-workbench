@@ -22,6 +22,7 @@ from .errors import (
     AcceptanceRequiredError,
 )
 from .runner import CodexCliRunner, ClaudeCliRunner
+from .mindmap import render_agentos_mindmap_html
 
 def get_default_db_path() -> Path:
     env_db = os.environ.get("WORKBENCH_DB")
@@ -117,6 +118,7 @@ def render_html(body: str, message: str = "", error: str = "") -> str:
         <div class="subtitle">本機優先 · 不變量治理 · 多模型自動除錯迴圈 · 主分支交付保護</div>
       </div>
       <div class="nav-bar">
+        <a href="/agentos-map" class="btn btn-purple btn-sm" style="margin-right: 6px;">🗺️ AgentOS 全景心智圖</a>
         <span class="db-info" title="{html.escape(str(DB_PATH))}">DB: {html.escape(DB_PATH.name)}</span>
         <a href="/" class="btn btn-secondary btn-sm">重新整理</a>
       </div>
@@ -136,6 +138,14 @@ class PrototypeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+
+        if parsed.path in ("/agentos-map", "/map"):
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(render_agentos_mindmap_html().encode("utf-8"))
+            return
+
         params = parse_qs(parsed.query)
         msg = params.get("msg", [""])[0]
         err = params.get("err", [""])[0]
