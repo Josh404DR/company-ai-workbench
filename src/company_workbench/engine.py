@@ -37,6 +37,7 @@ def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 
 RISK_LEVELS = ("low", "medium", "high")
+NODE_LAYERS = ("architecture", "logic", "memory", "milestone", "task")
 AUTO_ACCEPTOR = "auto-acceptor"
 DEFAULT_MEMORY_TTL_DAYS = 90
 MAX_EVIDENCE_BYTES = 1_000_000
@@ -208,6 +209,7 @@ class WorkbenchEngine:
         risk_level: str = "high",
         goal_id: str | None = None,
         depends_on_ticket_id: str | None = None,
+        node_id: str | None = None,
     ) -> dict[str, Any]:
         """risk_level is fixed at creation (default 'high' = Josh-only acceptance). There is
         deliberately no setter: lowering risk after the fact would be an acceptance bypass."""
@@ -219,11 +221,12 @@ class WorkbenchEngine:
             risk_level,
             goal_id=goal_id,
             depends_on_ticket_id=depends_on_ticket_id,
+            node_id=node_id,
         )
         try:
             with self.store.transaction() as db:
                 self._validate_goal_and_dependency(
-                    db, project_id, item["id"], goal_id, depends_on_ticket_id
+                    db, project_id, item["id"], goal_id, depends_on_ticket_id, node_id=node_id
                 )
                 self._insert_ticket(db, item)
         except sqlite3.IntegrityError as error:
@@ -237,6 +240,7 @@ class WorkbenchEngine:
         ticket_id: str | None,
         goal_id: str | None,
         depends_on_ticket_id: str | None,
+        node_id: str | None = None,
     ) -> None:
         if depends_on_ticket_id and not goal_id:
             raise ValueError("Ticket dependencies require a Goal; goal_id is mandatory when depends_on_ticket_id is specified")
@@ -247,6 +251,15 @@ class WorkbenchEngine:
                 raise NotFoundError(f"Goal not found: {goal_id}")
             if goal["project_id"] != project_id:
                 raise ValueError("Ticket and Goal must belong to the same Project")
+
+        if node_id:
+            node = db.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+            if not node:
+                raise NotFoundError(f"Node not found: {node_id}")
+            if node["project_id"] != project_id:
+                raise ValueError("Ticket and Node must belong to the same Project")
+            if goal_id and node["goal_id"] and node["goal_id"] != goal_id:
+                raise ValueError("Ticket Goal and Node Goal must match")
 
         if depends_on_ticket_id:
             dep = db.execute("SELECT * FROM tickets WHERE id=?", (depends_on_ticket_id,)).fetchone()
@@ -281,6 +294,7 @@ class WorkbenchEngine:
         risk_level: str,
         goal_id: str | None = None,
         depends_on_ticket_id: str | None = None,
+        node_id: str | None = None,
     ) -> dict[str, Any]:
         criteria = [str(value).strip() for value in acceptance_criteria if str(value).strip()]
         if not title.strip() or not goal.strip() or not criteria:
@@ -298,6 +312,7 @@ class WorkbenchEngine:
             "risk_level": risk_level,
             "goal_id": goal_id,
             "depends_on_ticket_id": depends_on_ticket_id,
+            "node_id": node_id,
             "created_at": now,
             "updated_at": now,
         }
@@ -305,8 +320,8 @@ class WorkbenchEngine:
     @staticmethod
     def _insert_ticket(db: sqlite3.Connection, item: dict[str, Any]) -> None:
         db.execute(
-            """INSERT INTO tickets(id,project_id,title,goal,acceptance_criteria_json,status,risk_level,goal_id,depends_on_ticket_id,created_at,updated_at)
-               VALUES (:id,:project_id,:title,:goal,:acceptance_criteria_json,:status,:risk_level,:goal_id,:depends_on_ticket_id,:created_at,:updated_at)""",
+            """INSERT INTO tickets(id,project_id,title,goal,acceptance_criteria_json,status,risk_level,goal_id,depends_on_ticket_id,node_id,created_at,updated_at)
+               VALUES (:id,:project_id,:title,:goal,:acceptance_criteria_json,:status,:risk_level,:goal_id,:depends_on_ticket_id,:node_id,:created_at,:updated_at)""",
             item,
         )
 
@@ -1351,6 +1366,232 @@ class WorkbenchEngine:
                 (goal_id, depends_on_ticket_id, now, ticket_id),
             )
         return self.get_ticket(ticket_id)
+
+    # -------------------------------------------------------------------------
+    # 5-Layer Hierarchy: Project -> Goal -> Milestone -> Node -> Ticket
+    # -------------------------------------------------------------------------
+
+    def create_node(
+        self,
+        project_id: str,
+        title: str,
+        summary: str,
+        layer: str = "task",
+        *,
+        goal_id: str | None = None,
+        parent_node_id: str | None = None,
+        details: str = "",
+        files: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not title.strip():
+            raise ValueError("Node requires title")
+        if not summary.strip():
+            raise ValueError("Node requires summary")
+        if layer not in NODE_LAYERS:
+            raise ValueError(f"Node layer must be one of {', '.join(NODE_LAYERS)}")
+
+        now = _now()
+        item = {
+            "id": _id("NOD"),
+            "project_id": project_id,
+            "goal_id": goal_id,
+            "parent_node_id": parent_node_id,
+            "layer": layer,
+            "title": title.strip(),
+            "summary": summary.strip(),
+            "details": (details or "").strip(),
+            "files_json": json.dumps(files or [], ensure_ascii=False),
+            "metadata_json": json.dumps(metadata or {}, ensure_ascii=False),
+            "created_at": now,
+        }
+
+        with self.store.transaction() as db:
+            if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+                raise NotFoundError(f"Project not found: {project_id}")
+            if goal_id:
+                goal = db.execute("SELECT project_id FROM goals WHERE id=?", (goal_id,)).fetchone()
+                if not goal:
+                    raise NotFoundError(f"Goal not found: {goal_id}")
+                if goal["project_id"] != project_id:
+                    raise ValueError("Node Goal must belong to the same Project")
+            if parent_node_id:
+                parent = db.execute("SELECT project_id FROM nodes WHERE id=?", (parent_node_id,)).fetchone()
+                if not parent:
+                    raise NotFoundError(f"Parent node not found: {parent_node_id}")
+                if parent["project_id"] != project_id:
+                    raise ValueError("Parent node must belong to the same Project")
+
+            db.execute(
+                """INSERT INTO nodes(id,project_id,goal_id,parent_node_id,layer,title,summary,details,files_json,metadata_json,created_at)
+                   VALUES (:id,:project_id,:goal_id,:parent_node_id,:layer,:title,:summary,:details,:files_json,:metadata_json,:created_at)""",
+                item,
+            )
+        return self.get_node(item["id"])
+
+    def get_node(self, node_id: str) -> dict[str, Any]:
+        with self.store.connect() as db:
+            row = db.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+            if not row:
+                raise NotFoundError(f"Node not found: {node_id}")
+            node = dict(row)
+            files = json.loads(node.pop("files_json") or "[]")
+            node["files"] = files
+            metadata = json.loads(node.pop("metadata_json") or "{}")
+            node["metadata"] = metadata
+
+            tickets = db.execute(
+                "SELECT * FROM tickets WHERE node_id=? ORDER BY created_at", (node_id,)
+            ).fetchall()
+            children = db.execute(
+                "SELECT id, title, layer, summary FROM nodes WHERE parent_node_id=? ORDER BY created_at", (node_id,)
+            ).fetchall()
+
+        parsed_tickets = []
+        for t in tickets:
+            item = dict(t)
+            item["acceptance_criteria"] = json.loads(item.pop("acceptance_criteria_json"))
+            parsed_tickets.append(item)
+        node["tickets"] = parsed_tickets
+        node["child_nodes"] = [dict(c) for c in children]
+        return node
+
+    def list_nodes(
+        self,
+        project_id: str,
+        *,
+        layer: str | None = None,
+        goal_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT id FROM nodes WHERE project_id=?"
+        params: list[Any] = [project_id]
+        if layer:
+            query += " AND layer=?"
+            params.append(layer)
+        if goal_id:
+            query += " AND goal_id=?"
+            params.append(goal_id)
+        query += " ORDER BY created_at"
+
+        with self.store.connect() as db:
+            rows = db.execute(query, tuple(params)).fetchall()
+        return [self.get_node(row["id"]) for row in rows]
+
+    def link_ticket_to_node(self, ticket_id: str, node_id: str) -> dict[str, Any]:
+        with self.store.transaction() as db:
+            ticket = db.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
+            if not ticket:
+                raise NotFoundError(f"Ticket not found: {ticket_id}")
+            node = db.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+            if not node:
+                raise NotFoundError(f"Node not found: {node_id}")
+            if node["project_id"] != ticket["project_id"]:
+                raise ValueError("Ticket and Node must belong to the same Project")
+
+            now = _now()
+            # If node has a goal_id and ticket does not, link to goal_id too
+            update_goal = node["goal_id"] if not ticket["goal_id"] else ticket["goal_id"]
+            db.execute(
+                "UPDATE tickets SET node_id=?, goal_id=?, updated_at=? WHERE id=?",
+                (node_id, update_goal, now, ticket_id),
+            )
+        return self.get_ticket(ticket_id)
+
+    def get_project_hierarchy(self, project_id: str) -> dict[str, Any]:
+        """Return the complete 5-layer hierarchy:
+        1. 專案結構 (Project Universe)
+        2. 長期目標 (Goals)
+        3. 中小型任務 (Milestones)
+        4. 心智圖譜節點 (Nodes: architecture, logic, memory, task)
+        5. 工單維度 (Tickets)
+        """
+        with self.store.connect() as db:
+            project_row = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+            if not project_row:
+                raise NotFoundError(f"Project not found: {project_id}")
+            project = dict(project_row)
+
+        goals = self.list_goals(project_id)
+        all_nodes = self.list_nodes(project_id)
+
+        milestones = [n for n in all_nodes if n["layer"] == "milestone"]
+        living_nodes = [n for n in all_nodes if n["layer"] != "milestone"]
+
+        with self.store.connect() as db:
+            all_ticket_rows = db.execute(
+                "SELECT * FROM tickets WHERE project_id=? ORDER BY created_at", (project_id,)
+            ).fetchall()
+        tickets = []
+        for t in all_ticket_rows:
+            item = dict(t)
+            item["acceptance_criteria"] = json.loads(item.pop("acceptance_criteria_json"))
+            tickets.append(item)
+
+        accepted_tickets = sum(1 for t in tickets if t["status"] == "accepted")
+        active_tickets = sum(1 for t in tickets if t["status"] in ("active", "ready", "verification"))
+
+        return {
+            "project": project,
+            "goals": goals,
+            "milestones": milestones,
+            "nodes": living_nodes,
+            "tickets": tickets,
+            "stats": {
+                "total_goals": len(goals),
+                "total_milestones": len(milestones),
+                "total_nodes": len(living_nodes),
+                "total_tickets": len(tickets),
+                "accepted_tickets": accepted_tickets,
+                "active_tickets": active_tickets,
+            },
+        }
+
+    def sync_agentos_mindmap_nodes(
+        self,
+        project_id: str,
+        *,
+        goal_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Populate database nodes from grounded AgentOS-Lite mind map definitions."""
+        from .mindmap import get_agentos_graph_data
+
+        nodes_data, _ = get_agentos_graph_data()
+        with self.store.transaction() as db:
+            for n in nodes_data:
+                existing = db.execute(
+                    "SELECT id FROM nodes WHERE project_id=? AND title=?", (project_id, n["label"])
+                ).fetchone()
+                if existing:
+                    continue
+                node_id = f"NOD-{n['id']}"
+                now = _now()
+                layer_map = {
+                    "architecture": "architecture",
+                    "logic": "logic",
+                    "memory": "memory",
+                    "milestone": "milestone",
+                    "task": "task",
+                    "delivery": "task",
+                }
+                schema_layer = layer_map.get(n.get("group", "task"), "task")
+                db.execute(
+                    """INSERT OR IGNORE INTO nodes(id,project_id,goal_id,parent_node_id,layer,title,summary,details,files_json,metadata_json,created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        node_id,
+                        project_id,
+                        goal_id,
+                        None,
+                        schema_layer,
+                        n["label"],
+                        n.get("summary", ""),
+                        n.get("details", ""),
+                        json.dumps(n.get("files", []), ensure_ascii=False),
+                        json.dumps({"level": n.get("level", 1), "color": n.get("color", "")}, ensure_ascii=False),
+                        now,
+                    ),
+                )
+        return self.list_nodes(project_id)
 
     def get_next_runnable_ticket_for_goal(self, goal_id: str) -> dict[str, Any] | None:
         """Find the first ready Ticket under this Goal whose dependency (if any) is accepted."""

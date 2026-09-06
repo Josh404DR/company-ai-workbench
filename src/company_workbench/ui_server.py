@@ -106,6 +106,7 @@ def render_html(body: str, message: str = "", error: str = "") -> str:
     .inline-form {{ display: inline-block; margin-right: 8px; margin-bottom: 6px; }}
     .grid-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }}
     .grid-3 {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }}
+    .grid-4 {{ display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; }}
     .nav-bar {{ display: flex; gap: 8px; align-items: center; }}
     .db-info {{ font-size: 12px; color: var(--text-muted); background: #eee; padding: 4px 8px; border-radius: 4px; }}
   </style>
@@ -182,6 +183,14 @@ class PrototypeHandler(BaseHTTPRequestHandler):
             f'<option value="{t["id"]}">#{t["id"]} - {html.escape(t["title"])} ({t["status"]})</option>' for t in all_tickets_list
         )
 
+        # Collect all nodes for node dropdown
+        all_nodes_list = []
+        for prj in all_projects:
+            all_nodes_list.extend(engine.list_nodes(prj["id"]))
+        node_options = '<option value="">(無 - 獨立工單)</option>' + "".join(
+            f'<option value="{n["id"]}">{html.escape(n["title"])} ({n["layer"]})</option>' for n in all_nodes_list
+        )
+
         # ── Quick Creation Bar (Project / Goal) ──
         content.append(f"""
         <div class="grid-2">
@@ -194,9 +203,15 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 <label>專案名稱</label>
                 <input type="text" name="name" required placeholder="例如：Payment Gateway / Auth Service">
               </div>
-              <button type="submit" class="btn btn-secondary btn-sm">建立專案</button>
-            </form>
-          </div>
+                <button type="submit" class="btn btn-secondary btn-sm">建立專案</button>
+              </form>
+              <div style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e1e4e8;">
+                <form method="POST" action="/nodes/sync-agentos" style="display:flex; gap:6px; align-items:center;">
+                  <select name="project_id" style="width:auto; font-size:12px; padding:5px 8px;">{prj_options}</select>
+                  <button type="submit" class="btn btn-purple btn-sm">⚡ 導入 AgentOS 核心節點庫</button>
+                </form>
+              </div>
+            </div>
 
           <!-- Create Goal -->
           <div class="card" style="border-top: 4px solid #6f42c1;">
@@ -298,10 +313,14 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 <input type="text" name="title" required placeholder="例如：實作用戶登入 API 與 JWT 驗證">
               </div>
             </div>
-            <div class="grid-3">
+            <div class="grid-4">
               <div class="form-group">
                 <label>所屬長任務 (Goal，可選)</label>
                 <select name="goal_id">{goal_options}</select>
+              </div>
+              <div class="form-group">
+                <label>所屬心智節點 (Node，可選)</label>
+                <select name="node_id">{node_options}</select>
               </div>
               <div class="form-group">
                 <label>前置依賴工單 (可選)</label>
@@ -413,6 +432,7 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 criteria_list = "".join(f"<li>{html.escape(c)}</li>" for c in tkt["acceptance_criteria"])
                 
                 goal_tag = f"<span class='badge' style='background:#f3e8fd;color:#6f42c1;'>Goal #{tkt['goal_id']}</span> " if tkt.get("goal_id") else ""
+                node_tag = f"<span class='badge' style='background:#e0f2fe;color:#0284c7;'>Node #{tkt['node_id']}</span> " if tkt.get("node_id") else ""
                 dep_tag = f"<span class='badge' style='background:#fff0f5;color:#d73a49;'>依賴 #{tkt['depends_on_ticket_id']}</span> " if tkt.get("depends_on_ticket_id") else ""
                 risk_tag = f"<span class='badge' style='background:#f1f8ff;color:#0366d6;'>Risk: {tkt.get('risk_level','high')}</span> "
 
@@ -421,7 +441,7 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                   <div style="display: flex; justify-content: space-between; align-items: center;">
                     <h3 style="margin:0;">{html.escape(tkt['title'])} <span style="font-size: 13px; color: #586069;">#{tkt['id']}</span></h3>
                     <div>
-                      {goal_tag}{dep_tag}{risk_tag}
+                      {goal_tag}{node_tag}{dep_tag}{risk_tag}
                       <span class="badge badge-{status}">{status}</span>
                     </div>
                   </div>
@@ -518,6 +538,11 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 else:
                     msg = f"Goal #{goal_id} 推進狀態: {res['action']} (當前進度: {res['goal']['progress_pct']}%)"
 
+            elif parsed.path == "/nodes/sync-agentos":
+                prj_id = get_val("project_id")
+                synced = engine.sync_agentos_mindmap_nodes(prj_id)
+                msg = f"成功為專案導入 AgentOS-Lite 全景心智節點 ({len(synced)} 個節點已載入資料庫)！"
+
             elif parsed.path == "/ticket/create":
                 prj_id = get_val("project_id")
                 title = get_val("title")
@@ -525,11 +550,13 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 raw_crit = get_val("criteria")
                 goal_id = get_val("goal_id") or None
                 dep_id = get_val("depends_on_ticket_id") or None
+                node_id = get_val("node_id") or None
                 risk = get_val("risk_level", "high")
                 criteria = [c.strip() for c in raw_crit.split("\n") if c.strip()]
                 tkt = engine.create_ticket(
                     prj_id, title, goal, criteria,
                     risk_level=risk, goal_id=goal_id, depends_on_ticket_id=dep_id,
+                    node_id=node_id,
                 )
                 msg = f"成功建立工單 Ticket #{tkt['id']}「{tkt['title']}」"
 

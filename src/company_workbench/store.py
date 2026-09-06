@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class SQLiteStore:
@@ -104,6 +104,11 @@ class SQLiteStore:
                 connection.execute(
                     "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (6, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
                 )
+            if 7 not in applied:
+                self._apply_v7(connection)
+                connection.execute(
+                    "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (7, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+                )
             connection.commit()
 
     @staticmethod
@@ -113,6 +118,33 @@ class SQLiteStore:
         except sqlite3.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+
+    @classmethod
+    def _apply_v7(cls, connection: sqlite3.Connection) -> None:
+        """5-layer hierarchy: Projects -> Goals -> Milestones -> Nodes -> Tickets."""
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS nodes (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id),
+                goal_id TEXT REFERENCES goals(id),
+                parent_node_id TEXT REFERENCES nodes(id),
+                layer TEXT NOT NULL CHECK(layer IN ('architecture','logic','memory','milestone','task')),
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                details TEXT,
+                files_json TEXT,
+                metadata_json TEXT,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+        node_columns = {row[1] for row in connection.execute("PRAGMA table_info(nodes)")}
+        if node_columns and "metadata_json" not in node_columns:
+            cls._safe_add_column(connection, "nodes", "metadata_json TEXT")
+        ticket_columns = {row[1] for row in connection.execute("PRAGMA table_info(tickets)")}
+        if ticket_columns and "node_id" not in ticket_columns:
+            cls._safe_add_column(connection, "tickets", "node_id TEXT REFERENCES nodes(id)")
 
     @classmethod
     def _apply_v6(cls, connection: sqlite3.Connection) -> None:

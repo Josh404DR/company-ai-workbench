@@ -117,6 +117,39 @@ class UiServerTestCase(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertIn("TestSuccess", body)
 
+    def test_ui_mindmap_and_nodes_sync(self):
+        # 1. GET /agentos-map renders living mind map
+        status, body, _ = self.request("GET", "/agentos-map")
+        self.assertEqual(200, status)
+        self.assertIn("AgentOS-Lite 結構化工作流與心智圖譜", body)
+        self.assertIn("Tier 0~4 分層治理憲法", body)
+
+        # 2. POST /nodes/sync-agentos populates SQLite nodes
+        status, _, headers = self.request("POST", "/nodes/sync-agentos", {
+            "project_id": self.prj["id"],
+        })
+        self.assertEqual(303, status)
+        nodes = self.engine.list_nodes(self.prj["id"])
+        self.assertGreaterEqual(len(nodes), 10)
+        target_node = next(n for n in nodes if "Contract Linter" in n["title"])
+
+        # 3. POST /ticket/create linked to node
+        status, _, _ = self.request("POST", "/ticket/create", {
+            "project_id": self.prj["id"],
+            "title": "驗證 LINT 門禁",
+            "goal": "核對 expected_outputs",
+            "criteria": "error_count 歸零",
+            "node_id": target_node["id"],
+            "risk_level": "high",
+        })
+        self.assertEqual(303, status)
+
+        # 4. GET / displays ticket with node badge
+        status, body, _ = self.request("GET", "/")
+        self.assertEqual(200, status)
+        self.assertIn(f"Node #{target_node['id']}", body)
+        self.assertIn("驗證 LINT 門禁", body)
+
 
 if __name__ == "__main__":
     unittest.main()

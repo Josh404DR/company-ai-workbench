@@ -11,3 +11,5 @@ debug.log
 .env.*
 *.env
 archive/
+scratch/
+
