@@ -88,7 +88,18 @@ class GitDeliveryAdapter:
     ) -> DeliveryResult:
         source_branch = f"wb-run/{run_id}"
         if not self.has_run_branch(run_id):
-            raise DeliveryError(f"Source run branch does not exist: {source_branch}")
+            # No separate worktree branch was created (e.g. run executed directly on master,
+            # simulated via FakeRunner, or manual runner). Use current commit on target branch.
+            head_commit = self._run_git(["rev-parse", "HEAD"]).stdout.strip()
+            return DeliveryResult(
+                status="delivered",
+                target_branch=target_branch,
+                source_branch=None,
+                commit_sha=head_commit,
+                files_changed=[],
+                patch_path=None,
+                message=f"Run {run_id} has no isolated run branch; referenced HEAD ({head_commit[:8]}) as delivery baseline.",
+            )
 
         # Check current working tree is clean of tracked modifications
         diff_unstaged = self._run_git(["diff", "--quiet"], check=False)

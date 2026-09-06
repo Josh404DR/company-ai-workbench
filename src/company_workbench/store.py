@@ -62,7 +62,7 @@ class SQLiteStore:
             if 1 not in applied:
                 self._apply_v1(connection)
                 connection.execute(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+                    "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
                 )
             if 2 not in applied:
                 columns = {row[1] for row in connection.execute("PRAGMA table_info(acceptances)")}
