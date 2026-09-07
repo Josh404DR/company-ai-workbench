@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -41,6 +42,9 @@ def _current_commit(path: Path) -> str | None:
 
 
 def _default_database() -> Path:
+    env_db = os.environ.get("WORKBENCH_DB")
+    if env_db:
+        return Path(env_db)
     return Path.cwd() / ".workbench" / "workbench.db"
 
 
@@ -292,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
             result = run_demo(Path(temp) / "demo.db")
         _out(result)
         return 0
+
 
     enable_auto_accept = (
         getattr(args, "auto_accept_low_risk", False) or

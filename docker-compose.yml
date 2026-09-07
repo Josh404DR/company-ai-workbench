@@ -1,23 +1,22 @@
-﻿version: '3.8'
+version: '3.8'
 
 services:
   workbench:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: company-ai-workbench
+    container_name: company-ai-workbench-local
     restart: unless-stopped
     ports:
       - "8088:8088"
     volumes:
-      - workbench_data:/data
-      - .:/workspace
+      - ./.workbench:/app/.workbench
+      - ./src:/app/src
+      - ./prototype:/app/prototype
+      - ..:/workspace
     environment:
-      - WORKBENCH_DB=/data/workbench.db
+      - WORKBENCH_DB=/app/.workbench/workbench.db
       - WORKBENCH_NODE_PATH=/usr/bin/node
       - PYTHONUNBUFFERED=1
-    working_dir: /workspace
+    working_dir: /app
 
-volumes:
-  workbench_data:
-    driver: local

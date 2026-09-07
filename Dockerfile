@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Setup application directory and data mount points
 WORKDIR /app
-RUN mkdir -p /data /workspace
+RUN mkdir -p /data /workspace /app/.workbench
 
 # Install project package
 COPY pyproject.toml /app/
@@ -34,7 +34,7 @@ RUN git config --global user.name "Workbench Daemon" \
 
 # Environment configuration
 ENV PYTHONUNBUFFERED=1
-ENV WORKBENCH_DB=/data/workbench.db
+ENV WORKBENCH_DB=/app/.workbench/workbench.db
 ENV WORKBENCH_NODE_PATH=/usr/bin/node
 ENV PYTHONPATH=/app/src:/app/prototype
 
