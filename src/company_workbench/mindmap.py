@@ -458,6 +458,206 @@ def render_agentos_mindmap_html():
       transform: scale(1.15);
     }}
 
+    /* 專案建立/導入彈窗 (New/Import Project Modal) */
+    .modal-backdrop {{
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(4, 8, 16, 0.82);
+      backdrop-filter: blur(6px);
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+    }}
+    .modal-backdrop.show {{
+      display: flex;
+    }}
+    .modal-dialog {{
+      background: #161b22;
+      border: 1px solid var(--border-bright);
+      border-radius: 12px;
+      width: 640px;
+      max-width: 94vw;
+      max-height: 88vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85);
+      animation: modalFadeIn 0.18s ease-out;
+      overflow: hidden;
+    }}
+    @keyframes modalFadeIn {{
+      from {{ transform: scale(0.96); opacity: 0; }}
+      to {{ transform: scale(1); opacity: 1; }}
+    }}
+    .modal-header {{
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.02);
+    }}
+    .modal-header h3 {{
+      margin: 0;
+      font-size: 14.5px;
+      font-weight: 700;
+      color: var(--text-bright);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }}
+    .modal-close-btn {{
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 18px;
+      cursor: pointer;
+      line-height: 1;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: all 0.15s;
+    }}
+    .modal-close-btn:hover {{
+      color: var(--text-bright);
+      background: rgba(255, 255, 255, 0.1);
+    }}
+    .modal-tabs {{
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: #0d1117;
+    }}
+    .modal-tab-btn {{
+      flex: 1;
+      padding: 10px 14px;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }}
+    .modal-tab-btn:hover {{
+      color: var(--text-bright);
+      background: rgba(255, 255, 255, 0.02);
+    }}
+    .modal-tab-btn.active {{
+      color: #58a6ff;
+      border-bottom-color: #58a6ff;
+      background: rgba(56, 139, 253, 0.06);
+    }}
+    .modal-body {{
+      padding: 18px;
+      overflow-y: auto;
+      flex: 1;
+    }}
+    .modal-tab-content {{
+      display: none;
+    }}
+    .modal-tab-content.active {{
+      display: block;
+    }}
+    .form-group {{
+      margin-bottom: 14px;
+    }}
+    .form-group label {{
+      display: block;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }}
+    .form-input {{
+      width: 100%;
+      box-sizing: border-box;
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 12.5px;
+      color: var(--text-bright);
+      outline: none;
+      transition: all 0.15s;
+    }}
+    .form-input:focus {{
+      border-color: #58a6ff;
+      box-shadow: 0 0 0 3px rgba(56, 139, 253, 0.2);
+    }}
+    .candidate-scroll {{
+      max-height: 180px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #0d1117;
+      margin-bottom: 12px;
+    }}
+    .candidate-card {{
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.12s;
+    }}
+    .candidate-card:hover {{
+      background: rgba(56, 139, 253, 0.08);
+    }}
+    .candidate-card.selected {{
+      background: rgba(56, 139, 253, 0.18);
+      border-left: 3px solid #58a6ff;
+    }}
+    .candidate-card.imported {{
+      opacity: 0.55;
+    }}
+    .modal-footer {{
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.02);
+    }}
+    .btn-secondary {{
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }}
+    .btn-secondary:hover {{
+      background: var(--hover-bg);
+      color: var(--text-bright);
+    }}
+    .btn-primary {{
+      background: #238636;
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #fff;
+      padding: 6px 16px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+    }}
+    .btn-primary:hover {{
+      background: #2ea043;
+    }}
+    .btn-primary:disabled {{
+      opacity: 0.5;
+      cursor: not-allowed;
+    }}
+
     /* 模式切換標籤頁 (View Mode Switcher) */
     .view-mode-tabs {{
       display: flex;
@@ -1320,8 +1520,8 @@ def render_agentos_mindmap_html():
               <div id="archived-project-list" style="display:none; max-height:160px; overflow-y:auto; padding:2px 0;"></div>
             </div>
             <div class="dropdown-divider"></div>
-            <div class="dropdown-action" onclick="promptCreateProject()">
-              <span>➕ 建立新專案...</span>
+            <div class="dropdown-action" onclick="openNewProjectModal()">
+              <span>➕ 建立 / 導入新專案...</span>
             </div>
           </div>
         </div>
@@ -1637,6 +1837,112 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
     </div>
 
   </main>
+
+  <!-- 專案建立 / 導入彈窗 Modal (New & Import Project Modal) -->
+  <div class="modal-backdrop" id="modal-new-project">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3><span>➕</span> 建立 / 導入專案 (New &amp; Import Project)</h3>
+        <button class="modal-close-btn" onclick="closeNewProjectModal()">✕</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="modal-tab-btn active" id="tab-btn-local" onclick="switchNewProjectTab('local')">
+          <span>📁</span> 本機專案資料夾
+        </button>
+        <button class="modal-tab-btn" id="tab-btn-github" onclick="switchNewProjectTab('github')">
+          <span>🌐</span> GitHub Pull / Fork
+        </button>
+        <button class="modal-tab-btn" id="tab-btn-blank" onclick="switchNewProjectTab('blank')">
+          <span>⚡</span> 空白專案
+        </button>
+      </div>
+      <div class="modal-body">
+        <!-- Tab 1: 本機專案資料夾 -->
+        <div class="modal-tab-content active" id="tab-content-local">
+          <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+            直接抓取本機現有專案目錄導入裝配台，自動解析 Git 分支並掛載日產精工心智工位：
+          </div>
+          <div class="form-group">
+            <label>快速選取本機目錄 (Discovered Local Folders):</label>
+            <div class="candidate-scroll" id="local-candidate-list">
+              <div style="padding:16px; text-align:center; color:var(--text-muted); font-size:12px;">正在掃描工作區目錄...</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>資料夾絕對路徑 (Folder Path):</label>
+            <input type="text" class="form-input" id="input-local-path" placeholder="/workspace/scc-system-control 或 E:\Workspace\..." />
+          </div>
+          <div class="form-group">
+            <label>自訂專案名稱 (Project Name):</label>
+            <input type="text" class="form-input" id="input-local-name" placeholder="例如：scc-system-control" />
+          </div>
+          <div style="margin-top:10px;">
+            <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="check-local-sync-nodes" checked />
+              自動導入 Tier 0~4 五階精工架構節點 (Architecture / Logic / Task)
+            </label>
+          </div>
+        </div>
+
+        <!-- Tab 2: GitHub Pull / Fork -->
+        <div class="modal-tab-content" id="tab-content-github">
+          <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+            從 GitHub 遠端拉取或 Fork 倉庫至本機工作區，並即刻初始化專案裝配節點：
+          </div>
+          <div class="form-group">
+            <label>GitHub 倉庫網址或 owner/repo (GitHub Repository):</label>
+            <input type="text" class="form-input" id="input-gh-repo" placeholder="例如：https://github.com/sayaJosh/scc-sys 或 sayaJosh/scc-sys" oninput="autoFillGithubInputs()" />
+          </div>
+          <div class="form-group">
+            <label>導入動作模式 (Action Mode):</label>
+            <div style="display:flex; gap:16px; font-size:12px; margin-top:4px;">
+              <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
+                <input type="radio" name="gh-action" value="clone" checked />
+                📥 直接 Clone / Pull 到本機
+              </label>
+              <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
+                <input type="radio" name="gh-action" value="fork" />
+                🍴 Fork 到我的帳號並 Clone
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>本機存放目錄名稱 (Target Folder):</label>
+            <input type="text" class="form-input" id="input-gh-folder" placeholder="例如：scc-sys" />
+          </div>
+          <div class="form-group">
+            <label>專案名稱 (Project Name):</label>
+            <input type="text" class="form-input" id="input-gh-name" placeholder="例如：scc-sys" />
+          </div>
+          <div class="form-group">
+            <label>指定拉取分支 (Branch, 選填):</label>
+            <input type="text" class="form-input" id="input-gh-branch" placeholder="留空預設主分支 (master / main)" />
+          </div>
+          <div style="margin-top:10px;">
+            <label style="font-size:12px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="check-gh-sync-nodes" checked />
+              自動導入 Tier 0~4 五階精工架構節點
+            </label>
+          </div>
+        </div>
+
+        <!-- Tab 3: 空白專案 -->
+        <div class="modal-tab-content" id="tab-content-blank">
+          <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+            在系統資料庫中直接建立一個全新獨立的空白專案：
+          </div>
+          <div class="form-group">
+            <label>專案名稱 (Project Name):</label>
+            <input type="text" class="form-input" id="input-blank-name" placeholder="例如：my-new-service" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeNewProjectModal()">取消</button>
+        <button class="btn-primary" id="btn-submit-import" onclick="executeCurrentProjectImport()">🚀 立即導入本機專案目錄</button>
+      </div>
+    </div>
+  </div>
 
   <!-- JavaScript 核心控制邏輯 -->
   <script>
@@ -1992,29 +2298,193 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
       loadDatabaseState(prjId);
     }}
 
-    async function promptCreateProject() {{
+    let currentNewProjectTab = "local";
+    let cachedCandidates = [];
+
+    function openNewProjectModal() {{
       const menu = document.getElementById("project-dropdown-menu");
       if (menu) menu.classList.remove("show");
 
-      const name = prompt("請輸入新專案名稱 (例如：ai-tool-core / scc-system-control):");
-      if (!name || !name.trim()) return;
+      const modal = document.getElementById("modal-new-project");
+      if (modal) modal.classList.add("show");
 
-      appendTerminalLine(`[PROJECT-CREATE] Creating project: "${{name.trim()}}"...`, "term-info");
+      switchNewProjectTab("local");
+      loadLocalCandidates();
+    }}
+
+    function closeNewProjectModal() {{
+      const modal = document.getElementById("modal-new-project");
+      if (modal) modal.classList.remove("show");
+    }}
+
+    function switchNewProjectTab(tab) {{
+      currentNewProjectTab = tab;
+      ["local", "github", "blank"].forEach(t => {{
+        const btn = document.getElementById(`tab-btn-${{t}}`);
+        const content = document.getElementById(`tab-content-${{t}}`);
+        if (btn) btn.classList.toggle("active", t === tab);
+        if (content) content.classList.toggle("active", t === tab);
+      }});
+      const submitBtn = document.getElementById("btn-submit-import");
+      if (submitBtn) {{
+        if (tab === "local") submitBtn.textContent = "🚀 導入本機專案目錄";
+        else if (tab === "github") submitBtn.textContent = "🌐 從 GitHub 拉取並建立專案";
+        else submitBtn.textContent = "⚡ 建立空白專案";
+      }}
+    }}
+
+    async function loadLocalCandidates() {{
+      const container = document.getElementById("local-candidate-list");
+      if (!container) return;
       try {{
-        const resp = await fetch("/api/project/create", {{
-          method: "POST",
-          headers: {{ "Content-Type": "application/json" }},
-          body: JSON.stringify({{ name: name.trim() }})
-        }});
+        const resp = await fetch("/api/project/candidates");
         const data = await resp.json();
-        if (data.status === "ok") {{
-          appendTerminalLine(`[PROJECT-CREATE] Project created: ${{data.project.name}} (${{data.project.id}})`, "term-success");
-          selectProject(data.project.id);
-        }} else {{
-          appendTerminalLine(`[PROJECT-CREATE-ERROR] ${{data.message}}`, "term-warn");
+        cachedCandidates = data.candidates || [];
+        if (cachedCandidates.length === 0) {{
+          container.innerHTML = '<div style="padding:16px; text-align:center; color:var(--text-muted); font-size:12px;">未掃描到本機工作區目錄，可於下方手動填寫路徑。</div>';
+          return;
+        }}
+        container.innerHTML = cachedCandidates.map(c => `
+          <div class="candidate-card ${{c.imported ? 'imported' : ''}}" onclick="selectCandidate('${{escapeHtml(c.path)}}', '${{escapeHtml(c.name)}}')">
+            <div style="flex:1; overflow:hidden;">
+              <div style="font-weight:700; color:var(--text-bright); font-size:12px; display:flex; align-items:center; gap:6px;">
+                <span>📁 ${{escapeHtml(c.name)}}</span>
+                ${{c.is_git ? `<span class="badge" style="background:rgba(56,139,253,0.15); color:#79c0ff; font-size:10px; padding:1px 5px; border-radius:3px;">git: ${{escapeHtml(c.branch || 'HEAD')}}</span>` : ''}}
+                ${{c.imported ? '<span class="badge" style="background:rgba(63,185,80,0.15); color:#3fb950; font-size:10px; padding:1px 5px; border-radius:3px;">已在裝配台</span>' : ''}}
+              </div>
+              <div style="font-size:10.5px; color:var(--text-muted); font-family:monospace; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                ${{escapeHtml(c.path)}} ${{c.remote ? `&middot; <span style="color:#8b949e;">${{escapeHtml(c.remote)}}</span>` : ''}}
+              </div>
+            </div>
+            <button class="btn-secondary" style="font-size:11px; padding:2px 8px; margin-left:8px;" onclick="event.stopPropagation(); selectCandidate('${{escapeHtml(c.path)}}', '${{escapeHtml(c.name)}}')">選取</button>
+          </div>
+        `).join("");
+
+        // 自動選取第一個尚未導入的候選目錄
+        const firstAvail = cachedCandidates.find(c => !c.imported);
+        if (firstAvail) {{
+          selectCandidate(firstAvail.path, firstAvail.name);
         }}
       }} catch(err) {{
-        appendTerminalLine(`[PROJECT-CREATE-ERROR] ${{err}}`, "term-dim");
+        container.innerHTML = `<div style="padding:16px; text-align:center; color:var(--text-muted); font-size:12px;">載入失敗: ${{err}}</div>`;
+      }}
+    }}
+
+    function selectCandidate(path, name) {{
+      const pathInput = document.getElementById("input-local-path");
+      const nameInput = document.getElementById("input-local-name");
+      if (pathInput) pathInput.value = path;
+      if (nameInput) nameInput.value = name;
+
+      document.querySelectorAll(".candidate-card").forEach(el => {{
+        el.classList.remove("selected");
+        if (el.textContent.includes(name)) el.classList.add("selected");
+      }});
+    }}
+
+    function autoFillGithubInputs() {{
+      const repoInput = document.getElementById("input-gh-repo");
+      const folderInput = document.getElementById("input-gh-folder");
+      const nameInput = document.getElementById("input-gh-name");
+      if (!repoInput) return;
+      const val = repoInput.value.trim();
+      if (!val) return;
+      let repoName = val.replace(/\/+$/, "").split("/").pop();
+      if (repoName.endsWith(".git")) repoName = repoName.slice(0, -4);
+      if (folderInput && !folderInput.value) folderInput.value = repoName;
+      if (nameInput && !nameInput.value) nameInput.value = repoName;
+    }}
+
+    async function executeCurrentProjectImport() {{
+      const submitBtn = document.getElementById("btn-submit-import");
+      if (submitBtn) submitBtn.disabled = true;
+
+      try {{
+        if (currentNewProjectTab === "local") {{
+          const path = document.getElementById("input-local-path").value.trim();
+          const name = document.getElementById("input-local-name").value.trim();
+          const syncNodes = document.getElementById("check-local-sync-nodes").checked;
+          if (!path) {{
+            alert("請輸入或選取本機目錄路徑");
+            return;
+          }}
+          appendTerminalLine(`[IMPORT-LOCAL] Importing local directory: "${{path}}"...`, "term-info");
+          const resp = await fetch("/api/project/import-local", {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ path: path, name: name, sync_nodes: syncNodes }})
+          }});
+          const data = await resp.json();
+          if (data.status === "ok") {{
+            appendTerminalLine(`[IMPORT-SUCCESS] ${{data.message}}`, "term-success");
+            closeNewProjectModal();
+            selectProject(data.project.id);
+          }} else {{
+            alert(data.message || "導入失敗");
+            appendTerminalLine(`[IMPORT-ERROR] ${{data.message}}`, "term-warn");
+          }}
+
+        }} else if (currentNewProjectTab === "github") {{
+          const repo = document.getElementById("input-gh-repo").value.trim();
+          const actionRadio = document.querySelector('input[name="gh-action"]:checked');
+          const action = actionRadio ? actionRadio.value : "clone";
+          const folder = document.getElementById("input-gh-folder").value.trim();
+          const name = document.getElementById("input-gh-name").value.trim();
+          const branch = document.getElementById("input-gh-branch").value.trim();
+          const syncNodes = document.getElementById("check-gh-sync-nodes").checked;
+          if (!repo) {{
+            alert("請輸入 GitHub 倉庫網址或 owner/repo");
+            return;
+          }}
+          appendTerminalLine(`[IMPORT-GITHUB] Pulling from GitHub: "${{repo}}" (${{action}})...`, "term-info");
+          const resp = await fetch("/api/project/import-github", {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{
+              repo: repo,
+              action: action,
+              target_folder: folder,
+              project_name: name,
+              branch: branch,
+              sync_nodes: syncNodes
+            }})
+          }});
+          const data = await resp.json();
+          if (data.status === "ok") {{
+            appendTerminalLine(`[IMPORT-SUCCESS] ${{data.message}}`, "term-success");
+            closeNewProjectModal();
+            selectProject(data.project.id);
+          }} else {{
+            alert(data.message || "GitHub 導入失敗");
+            appendTerminalLine(`[IMPORT-ERROR] ${{data.message}}`, "term-warn");
+          }}
+
+        }} else if (currentNewProjectTab === "blank") {{
+          const name = document.getElementById("input-blank-name").value.trim();
+          if (!name) {{
+            alert("請輸入專案名稱");
+            return;
+          }}
+          appendTerminalLine(`[PROJECT-CREATE] Creating blank project: "${{name}}"...`, "term-info");
+          const resp = await fetch("/api/project/create", {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ name: name }})
+          }});
+          const data = await resp.json();
+          if (data.status === "ok") {{
+            appendTerminalLine(`[PROJECT-CREATE] Blank project created: ${{data.project.name}} (${{data.project.id}})`, "term-success");
+            closeNewProjectModal();
+            selectProject(data.project.id);
+          }} else {{
+            alert(data.message || "建立失敗");
+            appendTerminalLine(`[PROJECT-CREATE-ERROR] ${{data.message}}`, "term-warn");
+          }}
+        }}
+      }} catch(err) {{
+        appendTerminalLine(`[IMPORT-ERROR] ${{err}}`, "term-dim");
+      }} finally {{
+        if (submitBtn) submitBtn.disabled = false;
       }}
     }}
 

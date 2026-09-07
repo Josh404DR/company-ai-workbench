@@ -1626,7 +1626,8 @@ class WorkbenchEngine:
                 ).fetchone()
                 if existing:
                     continue
-                node_id = f"NOD-{n['id']}"
+                clean_pid = project_id.replace("PRJ-", "")
+                node_id = f"NOD-{clean_pid}-{n['id']}"
                 now = _now()
                 layer_map = {
                     "architecture": "architecture",

@@ -8,6 +8,7 @@ import html
 import json
 import os
 import sys
+import subprocess
 import traceback
 import webbrowser
 from http import HTTPStatus
@@ -226,6 +227,62 @@ class PrototypeHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
             self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/project/candidates":
+            engine = get_engine()
+            workspaces = engine.list_workspaces()
+            imported_paths = {w.get("root_path") for w in workspaces if w.get("root_path")}
+            imported_names = {w["name"].lower() for w in workspaces}
+            for w in workspaces:
+                for p in engine.list_projects(w["id"], include_archived=True):
+                    imported_names.add(p["name"].lower())
+
+            roots = [Path("/workspace"), Path("E:/Workspace")]
+            root = next((r for r in roots if r.exists()), Path.cwd().parent)
+
+            candidates = []
+            if root.exists():
+                for item in sorted(root.iterdir()):
+                    if not item.is_dir() or item.name.startswith(".") or item.name.startswith("_"):
+                        continue
+                    is_git = (item / ".git").exists()
+                    branch = None
+                    remote = None
+                    if is_git:
+                        try:
+                            res = subprocess.run(
+                                ["git", "-C", str(item), "branch", "--show-current"],
+                                capture_output=True, text=True, timeout=3,
+                            )
+                            branch = res.stdout.strip() or "HEAD"
+                            res_rem = subprocess.run(
+                                ["git", "-C", str(item), "config", "--get", "remote.origin.url"],
+                                capture_output=True, text=True, timeout=3,
+                            )
+                            remote = res_rem.stdout.strip() or None
+                        except Exception:
+                            pass
+
+                    posix_path = str(item).replace("\\", "/")
+                    is_imported = (
+                        posix_path in imported_paths or
+                        str(item) in imported_paths or
+                        item.name.lower() in imported_names
+                    )
+                    candidates.append({
+                        "name": item.name,
+                        "path": posix_path,
+                        "is_git": is_git,
+                        "branch": branch,
+                        "remote": remote,
+                        "imported": is_imported,
+                    })
+
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok", "candidates": candidates, "root_dir": str(root).replace("\\", "/")}, ensure_ascii=False).encode("utf-8"))
             return
 
         if parsed.path == "/api/telemetry/errors":
@@ -759,6 +816,159 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                     res = {"status": "ok", "project": updated}
                 except Exception as exc:
                     res = {"status": "error", "message": str(exc)}
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/project/import-local":
+            try:
+                body = json.loads(post_body)
+            except Exception:
+                parsed_dict = parse_qs(post_body)
+                body = {k: v[0] for k, v in parsed_dict.items()}
+
+            raw_path = str(body.get("path", "")).strip()
+            name = str(body.get("name", "")).strip()
+            sync_nodes = bool(body.get("sync_nodes", True))
+
+            if not raw_path:
+                res = {"status": "error", "message": "請指定本機資料夾路徑"}
+            else:
+                norm = raw_path.replace("\\", "/")
+                target_path = None
+                if Path("/workspace").exists():
+                    if norm.lower().startswith("e:/workspace/"):
+                        target_path = Path("/workspace") / norm[len("e:/workspace/"):]
+                    elif norm.lower() == "e:/workspace":
+                        target_path = Path("/workspace")
+                    elif norm.startswith("/workspace"):
+                        target_path = Path(norm)
+                    else:
+                        target_path = Path("/workspace") / norm.lstrip("/")
+                else:
+                    if norm.startswith("/workspace/"):
+                        target_path = Path("E:/Workspace") / norm[len("/workspace/"):]
+                    elif norm == "/workspace":
+                        target_path = Path("E:/Workspace")
+                    else:
+                        target_path = Path(raw_path)
+
+                if not target_path.exists() or not target_path.is_dir():
+                    res = {"status": "error", "message": f"找不到路徑或不是有效目錄: {target_path}"}
+                else:
+                    proj_name = name or target_path.name
+                    engine = get_engine()
+                    canonical_path = str(target_path).replace("\\", "/")
+                    existing_ws = next((w for w in engine.list_workspaces() if w.get("root_path") == canonical_path), None)
+                    if existing_ws:
+                        ws = existing_ws
+                    else:
+                        ws = engine.create_workspace(proj_name, root_path=canonical_path)
+
+                    prj = engine.create_project(ws["id"], proj_name)
+                    if sync_nodes:
+                        try:
+                            engine.sync_agentos_mindmap_nodes(prj["id"])
+                        except Exception:
+                            pass
+                    res = {
+                        "status": "ok",
+                        "project": prj,
+                        "workspace": ws,
+                        "project_id": prj["id"],
+                        "message": f"成功導入本機專案「{prj['name']}」！",
+                    }
+
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/project/import-github":
+            try:
+                body = json.loads(post_body)
+            except Exception:
+                parsed_dict = parse_qs(post_body)
+                body = {k: v[0] for k, v in parsed_dict.items()}
+
+            repo_input = str(body.get("repo", "")).strip()
+            action = str(body.get("action", "clone")).strip()
+            target_folder = str(body.get("target_folder", "")).strip()
+            project_name = str(body.get("project_name", "")).strip()
+            branch = str(body.get("branch", "")).strip()
+            sync_nodes = bool(body.get("sync_nodes", True))
+
+            if not repo_input:
+                res = {"status": "error", "message": "請輸入 GitHub 倉庫網址或 owner/repo"}
+            else:
+                if repo_input.startswith("https://") or repo_input.startswith("git@"):
+                    repo_url = repo_input
+                    repo_part = repo_input.rstrip("/").split("/")[-1]
+                    if repo_part.endswith(".git"):
+                        repo_part = repo_part[:-4]
+                    default_name = repo_part
+                else:
+                    repo_url = f"https://github.com/{repo_input.strip('/')}.git"
+                    default_name = repo_input.strip("/").split("/")[-1]
+
+                folder_name = target_folder or default_name
+                proj_name = project_name or folder_name
+
+                roots = [Path("/workspace"), Path("E:/Workspace")]
+                root = next((r for r in roots if r.exists()), Path.cwd().parent)
+                dest_dir = root / folder_name
+
+                fork_msg = ""
+                if action == "fork":
+                    try:
+                        clean_repo = repo_input.replace("https://github.com/", "").rstrip("/").replace(".git", "")
+                        fork_res = subprocess.run(
+                            ["gh", "repo", "fork", clean_repo, "--clone=false"],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        if fork_res.returncode == 0:
+                            fork_msg = " (已在 GitHub 建立 Fork)"
+                    except Exception:
+                        pass
+
+                try:
+                    if dest_dir.exists() and (dest_dir / ".git").exists():
+                        p_res = subprocess.run(["git", "-C", str(dest_dir), "pull"], capture_output=True, text=True, timeout=60)
+                        clone_msg = "本地已有此倉庫，已自動執行 git pull 同步"
+                    else:
+                        clone_cmd = ["git", "clone"]
+                        if branch:
+                            clone_cmd.extend(["-b", branch])
+                        clone_cmd.extend([repo_url, str(dest_dir)])
+                        c_res = subprocess.run(clone_cmd, capture_output=True, text=True, timeout=120)
+                        if c_res.returncode != 0:
+                            err_msg = c_res.stderr.strip() or c_res.stdout.strip()
+                            raise RuntimeError(f"Git Clone 失敗: {err_msg}")
+                        clone_msg = "Git Clone 成功"
+
+                    engine = get_engine()
+                    canonical_path = str(dest_dir).replace("\\", "/")
+                    ws = engine.create_workspace(proj_name, root_path=canonical_path)
+                    prj = engine.create_project(ws["id"], proj_name)
+                    if sync_nodes:
+                        try:
+                            engine.sync_agentos_mindmap_nodes(prj["id"])
+                        except Exception:
+                            pass
+
+                    res = {
+                        "status": "ok",
+                        "project": prj,
+                        "workspace": ws,
+                        "project_id": prj["id"],
+                        "message": f"成功建立專案「{prj['name']}」{fork_msg}！({clone_msg})",
+                    }
+                except Exception as exc:
+                    res = {"status": "error", "message": f"GitHub 導入失敗: {str(exc)}"}
+
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()

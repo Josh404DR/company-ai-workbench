@@ -317,11 +317,49 @@ class ProjectSwitcherTestCase(unittest.TestCase):
         active_ids_restored = [p["id"] for p in state_after_unarchive.get("all_projects", [])]
         self.assertIn(new_prj_id, active_ids_restored)
 
-        # 8. Verify HTML markup includes archived section and item action buttons
+        # 8. Verify HTML markup includes modal and buttons
         status, body, _ = self.request("GET", "/")
         self.assertEqual(200, status)
         self.assertIn("archived-projects-wrapper", body)
         self.assertIn("btn-item-action", body)
+        self.assertIn("modal-new-project", body)
+        self.assertIn("tab-btn-local", body)
+        self.assertIn("tab-btn-github", body)
+        self.assertIn("openNewProjectModal()", body)
+
+        # 9. Test GET /api/project/candidates
+        status, body, _ = self.request("GET", "/api/project/candidates")
+        self.assertEqual(200, status)
+        data_candidates = json.loads(body)
+        self.assertEqual("ok", data_candidates.get("status"))
+        self.assertIsInstance(data_candidates.get("candidates"), list)
+
+        # 10. Test POST /api/project/import-local with temporary folder
+        with tempfile.TemporaryDirectory() as target_dir:
+            status, data = self.request_json("/api/project/import-local", {
+                "path": target_dir,
+                "name": "Imported Local Project",
+                "sync_nodes": True,
+            })
+            self.assertEqual(200, status)
+            self.assertEqual("ok", data.get("status"))
+            self.assertEqual("Imported Local Project", data["project"]["name"])
+            imported_prj_id = data["project"]["id"]
+
+            # Verify in state
+            status, body, _ = self.request("GET", f"/api/state?project_id={imported_prj_id}")
+            self.assertEqual(200, status)
+            state_imp = json.loads(body)
+            self.assertEqual(imported_prj_id, state_imp["project"]["id"])
+            self.assertGreaterEqual(len(state_imp["nodes"]), 10)
+
+        # 11. Test POST /api/project/import-github validation
+        status, data = self.request_json("/api/project/import-github", {
+            "repo": "",
+        })
+        self.assertEqual(200, status)
+        self.assertEqual("error", data.get("status"))
+        self.assertIn("請輸入", data.get("message", ""))
 
 
 if __name__ == "__main__":
