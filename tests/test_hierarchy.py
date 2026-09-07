@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import pytest
 from pathlib import Path
@@ -9,7 +9,7 @@ from company_workbench.errors import NotFoundError
 def test_schema_v7_applied(tmp_path: Path):
     db_path = tmp_path / "test.db"
     engine = WorkbenchEngine(db_path)
-    assert engine.store.schema_version() == 7
+    assert engine.store.schema_version() >= 7
 
 
 def test_create_and_get_node(tmp_path: Path):

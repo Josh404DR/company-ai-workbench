@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterator
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class SQLiteStore:
@@ -109,6 +109,11 @@ class SQLiteStore:
                 connection.execute(
                     "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (7, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
                 )
+            if 8 not in applied:
+                self._apply_v8(connection)
+                connection.execute(
+                    "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (8, strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+                )
             connection.commit()
 
     @staticmethod
@@ -118,6 +123,32 @@ class SQLiteStore:
         except sqlite3.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+
+    @classmethod
+    def _apply_v8(cls, connection: sqlite3.Connection) -> None:
+        """System error telemetry, background sentinel findings, and automated issue triage."""
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS system_errors (
+                id TEXT PRIMARY KEY,
+                fingerprint TEXT NOT NULL,
+                source TEXT NOT NULL CHECK(source IN ('frontend','backend','runner','sentinel','linter')),
+                severity TEXT NOT NULL CHECK(severity IN ('critical','error','warning','info')),
+                error_type TEXT NOT NULL,
+                message TEXT NOT NULL,
+                stack_trace TEXT,
+                context_json TEXT,
+                occurrence_count INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL CHECK(status IN ('unresolved','triaged','ticket_created','resolved','ignored')),
+                ticket_id TEXT REFERENCES tickets(id),
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_system_errors_fingerprint ON system_errors(fingerprint);
+            CREATE INDEX IF NOT EXISTS idx_system_errors_status ON system_errors(status);
+            CREATE INDEX IF NOT EXISTS idx_system_errors_source ON system_errors(source);
+            """
+        )
 
     @classmethod
     def _apply_v7(cls, connection: sqlite3.Connection) -> None:

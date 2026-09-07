@@ -1226,6 +1226,13 @@ class WorkbenchEngine:
             rows = db.execute("SELECT * FROM projects WHERE workspace_id=? ORDER BY created_at", (workspace_id,)).fetchall()
         return [dict(r) for r in rows]
 
+    def get_project(self, project_id: str) -> dict[str, Any]:
+        with self.store.connect() as db:
+            row = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not row:
+            raise NotFoundError(f"Project not found: {project_id}")
+        return dict(row)
+
     def list_tickets(self, project_id: str, *, goal_id: str | None = None) -> list[dict[str, Any]]:
         with self.store.connect() as db:
             if goal_id is not None:
@@ -1922,5 +1929,253 @@ class WorkbenchEngine:
         return {
             "goal": self.get_goal(goal_id),
             "ticket_deliveries": results,
+        }
+
+    # ── Error Telemetry & Sentinel Watchdog ────────────────────────────
+
+    def record_error(
+        self,
+        source: str,
+        message: str,
+        *,
+        error_type: str | None = None,
+        severity: str = "error",
+        stack_trace: str | None = None,
+        context: dict[str, Any] | None = None,
+        fingerprint: str | None = None,
+        auto_ticket: bool = False,
+        project_id: str | None = None,
+        node_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Record an error in system_errors with deduplication, fingerprinting, and auto-ticket support."""
+        if source not in ("frontend", "backend", "runner", "sentinel", "linter"):
+            source = "backend"
+        if severity not in ("critical", "error", "warning", "info"):
+            severity = "error"
+        error_type = error_type or "WorkbenchError"
+        message_str = (message or "").strip()
+
+        # Compute stable fingerprint if not explicitly supplied
+        if not fingerprint:
+            norm_msg = re.sub(r"[0-9a-fA-F]{8,}", "<hash>", message_str)
+            norm_msg = re.sub(r"\d+", "<n>", norm_msg)
+            fp_raw = f"{source}:{error_type}:{norm_msg[:200]}"
+            fingerprint = hashlib.sha256(fp_raw.encode("utf-8")).hexdigest()[:16]
+
+        now = _now()
+        context_json = json.dumps(context or {}, ensure_ascii=False)
+
+        with self.store.transaction() as db:
+            existing = db.execute(
+                """SELECT * FROM system_errors
+                   WHERE fingerprint=? AND status IN ('unresolved', 'triaged', 'ticket_created')
+                   ORDER BY rowid DESC LIMIT 1""",
+                (fingerprint,),
+            ).fetchone()
+
+            if existing:
+                err_id = existing["id"]
+                new_count = existing["occurrence_count"] + 1
+                db.execute(
+                    """UPDATE system_errors
+                       SET occurrence_count=?, last_seen_at=?, message=?,
+                           stack_trace=COALESCE(?, stack_trace), context_json=?
+                       WHERE id=?""",
+                    (new_count, now, message_str, stack_trace, context_json, err_id),
+                )
+                err_record = _row(db.execute("SELECT * FROM system_errors WHERE id=?", (err_id,)).fetchone())
+            else:
+                err_id = _id("ERR")
+                err_record = {
+                    "id": err_id,
+                    "fingerprint": fingerprint,
+                    "source": source,
+                    "severity": severity,
+                    "error_type": error_type,
+                    "message": message_str,
+                    "stack_trace": stack_trace,
+                    "context_json": context_json,
+                    "occurrence_count": 1,
+                    "status": "unresolved",
+                    "ticket_id": None,
+                    "created_at": now,
+                    "last_seen_at": now,
+                }
+                db.execute(
+                    """INSERT INTO system_errors
+                       (id, fingerprint, source, severity, error_type, message, stack_trace,
+                        context_json, occurrence_count, status, ticket_id, created_at, last_seen_at)
+                       VALUES (:id, :fingerprint, :source, :severity, :error_type, :message, :stack_trace,
+                               :context_json, :occurrence_count, :status, :ticket_id, :created_at, :last_seen_at)""",
+                    err_record,
+                )
+
+        if auto_ticket and not err_record.get("ticket_id"):
+            try:
+                ticket_info = self.convert_error_to_ticket(err_record["id"], project_id=project_id, node_id=node_id)
+                err_record["ticket_id"] = ticket_info["id"]
+                err_record["status"] = "ticket_created"
+            except Exception:
+                pass
+
+        return err_record
+
+    def list_errors(
+        self,
+        *,
+        status: str | None = None,
+        source: str | None = None,
+        severity: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """List collected errors with filtering and ordering by most recently seen."""
+        clauses = []
+        params: list[Any] = []
+        if status:
+            clauses.append("status=?")
+            params.append(status)
+        if source:
+            clauses.append("source=?")
+            params.append(source)
+        if severity:
+            clauses.append("severity=?")
+            params.append(severity)
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = f"SELECT * FROM system_errors {where} ORDER BY last_seen_at DESC LIMIT {int(limit)}"
+
+        with self.store.connect() as db:
+            rows = db.execute(query, tuple(params)).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_error(self, error_id: str) -> dict[str, Any]:
+        """Fetch an individual error record by ID."""
+        with self.store.connect() as db:
+            row = db.execute("SELECT * FROM system_errors WHERE id=?", (error_id,)).fetchone()
+        if not row:
+            raise NotFoundError(f"System Error not found: {error_id}")
+        return dict(row)
+
+    def resolve_error(self, error_id: str, *, status: str = "resolved") -> dict[str, Any]:
+        """Mark an error as resolved or ignored."""
+        if status not in ("resolved", "ignored", "triaged"):
+            status = "resolved"
+        with self.store.transaction() as db:
+            row = db.execute("SELECT * FROM system_errors WHERE id=?", (error_id,)).fetchone()
+            if not row:
+                raise NotFoundError(f"System Error not found: {error_id}")
+            db.execute("UPDATE system_errors SET status=? WHERE id=?", (status, error_id))
+            updated = db.execute("SELECT * FROM system_errors WHERE id=?", (error_id,)).fetchone()
+            return dict(updated)
+
+    def convert_error_to_ticket(
+        self,
+        error_id: str,
+        *,
+        project_id: str | None = None,
+        node_id: str | None = None,
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        """Convert a system error directly into an atomic fix ticket for auto-debug remediation."""
+        err = self.get_error(error_id)
+        if not project_id:
+            workspaces = self.list_workspaces()
+            if workspaces:
+                prjs = self.list_projects(workspaces[0]["id"])
+                project_id = prjs[0]["id"] if prjs else None
+        if not project_id:
+            raise ValueError("No project found to associate fix ticket with.")
+
+        tkt_title = title or f"【故障修復】{err['source'].upper()}: {err['error_type']} - {err['message'][:35]}"
+        tkt_goal = f"自動修復遙測系統錯誤 [{err['id']}] (指紋 {err['fingerprint']}):\n{err['message']}"
+        criteria = [
+            f"故障代碼根除，指紋 {err['fingerprint']} 歸零 (error_count=0)",
+            "回歸測試通過且無違反 Invariant 1~14 契約",
+            "產生獨立 Verifier SHA-256 驗證證據",
+        ]
+
+        ticket = self.create_ticket(
+            project_id=project_id,
+            title=tkt_title,
+            goal=tkt_goal,
+            acceptance_criteria=criteria,
+            risk_level="high",
+            node_id=node_id,
+        )
+
+        with self.store.transaction() as db:
+            db.execute(
+                "UPDATE system_errors SET status='ticket_created', ticket_id=? WHERE id=?",
+                (ticket["id"], error_id),
+            )
+
+        return ticket
+
+    def run_sentinel_health_check(self, project_id: str | None = None) -> dict[str, Any]:
+        """Run proactive background health and contract consistency scans across projects and nodes."""
+        now = _now()
+        findings: list[dict[str, Any]] = []
+
+        workspaces = self.list_workspaces()
+        all_projects = []
+        if project_id:
+            all_projects.append(self.get_project(project_id))
+        else:
+            for ws in workspaces:
+                all_projects.extend(self.list_projects(ws["id"]))
+
+        for prj in all_projects:
+            pid = prj["id"]
+            nodes = self.list_nodes(pid)
+            tickets = self.list_tickets(pid)
+
+            # 1. 檢查 N4 探索工位與階層式產物邊界
+            for node in nodes:
+                files = node.get("files", [])
+                if any("n4-exploratory" in f for f in files):
+                    # 檢查是否有未定義階層 expected_outputs
+                    if not node.get("details") or "expected_outputs" not in node.get("details", ""):
+                        findings.append({
+                            "source": "sentinel",
+                            "severity": "warning",
+                            "error_type": "LINT-007",
+                            "message": f"工位 [{node['id']}] {node['title']} 需聲明階層式 expected_outputs 與獨立 Verifier 規範",
+                            "node_id": node["id"],
+                            "project_id": pid,
+                        })
+
+            # 2. 檢查孤立工單或依賴閉環
+            ticket_map = {t["id"]: t for t in tickets}
+            for tkt in tickets:
+                dep_id = tkt.get("depends_on_ticket_id")
+                if dep_id and dep_id not in ticket_map:
+                    findings.append({
+                        "source": "sentinel",
+                        "severity": "error",
+                        "error_type": "ORPHAN-DEPENDENCY",
+                        "message": f"工單 #{tkt['id']} 的前置依賴 #{dep_id} 不存在於當前專案中",
+                        "ticket_id": tkt["id"],
+                        "project_id": pid,
+                    })
+
+        # 將 findings 記錄至 system_errors
+        recorded_errors = []
+        for f in findings:
+            err = self.record_error(
+                source=f["source"],
+                message=f["message"],
+                error_type=f["error_type"],
+                severity=f["severity"],
+                context={"project_id": f.get("project_id"), "node_id": f.get("node_id"), "ticket_id": f.get("ticket_id")},
+                project_id=f.get("project_id"),
+                node_id=f.get("node_id"),
+            )
+            recorded_errors.append(err)
+
+        return {
+            "scanned_at": now,
+            "findings_count": len(findings),
+            "findings": findings,
+            "recorded_errors": recorded_errors,
         }
 

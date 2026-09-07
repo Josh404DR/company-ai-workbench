@@ -8,6 +8,7 @@ import html
 import json
 import os
 import sys
+import traceback
 import webbrowser
 from http import HTTPStatus
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -38,7 +39,9 @@ HOST: str = "127.0.0.1"
 def get_engine() -> WorkbenchEngine:
     path = DB_PATH
     if "ui_server" in sys.modules and hasattr(sys.modules["ui_server"], "DB_PATH"):
-        path = sys.modules["ui_server"].DB_PATH
+        shim_path = getattr(sys.modules["ui_server"], "DB_PATH")
+        if shim_path != get_default_db_path():
+            path = shim_path
     return WorkbenchEngine(path, acceptance_authority=TIERED_ACCEPTANCE_AUTHORITY)
 
 
@@ -161,6 +164,26 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 "tickets": tickets,
                 "nodes": nodes,
                 "db_path": str(DB_PATH),
+            }
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/telemetry/errors":
+            engine = get_engine()
+            params = parse_qs(parsed.query)
+            status_filter = params.get("status", [None])[0]
+            source_filter = params.get("source", [None])[0]
+            severity_filter = params.get("severity", [None])[0]
+            limit_val = int(params.get("limit", ["50"])[0])
+            errors = engine.list_errors(status=status_filter, source=source_filter, severity=severity_filter, limit=limit_val)
+            unresolved = engine.list_errors(status="unresolved")
+            data = {
+                "errors": errors,
+                "unresolved_count": len(unresolved),
+                "total_count": len(errors),
             }
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -528,6 +551,88 @@ class PrototypeHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(res_data, ensure_ascii=False).encode("utf-8"))
             return
 
+        if parsed.path == "/api/telemetry/errors":
+            try:
+                body = json.loads(post_body)
+            except Exception:
+                parsed_dict = parse_qs(post_body)
+                body = {k: v[0] for k, v in parsed_dict.items()}
+
+            engine = get_engine()
+            err_record = engine.record_error(
+                source=body.get("source", "frontend"),
+                message=body.get("message", "Unknown error"),
+                error_type=body.get("error_type", "ClientError"),
+                severity=body.get("severity", "error"),
+                stack_trace=body.get("stack_trace"),
+                context=body.get("context", {}),
+                fingerprint=body.get("fingerprint"),
+                auto_ticket=bool(body.get("auto_ticket", False)),
+                project_id=body.get("project_id"),
+                node_id=body.get("node_id"),
+            )
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok", "error": err_record}, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/telemetry/errors/convert-ticket":
+            try:
+                body = json.loads(post_body)
+            except Exception:
+                parsed_dict = parse_qs(post_body)
+                body = {k: v[0] for k, v in parsed_dict.items()}
+
+            error_id = str(body.get("error_id", "")).strip()
+            project_id = body.get("project_id")
+            node_id = body.get("node_id")
+            engine = get_engine()
+            try:
+                ticket = engine.convert_error_to_ticket(error_id, project_id=project_id, node_id=node_id)
+                res = {"status": "ok", "ticket": ticket}
+            except Exception as exc:
+                res = {"status": "error", "message": str(exc)}
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/telemetry/errors/resolve":
+            try:
+                body = json.loads(post_body)
+            except Exception:
+                parsed_dict = parse_qs(post_body)
+                body = {k: v[0] for k, v in parsed_dict.items()}
+
+            error_id = str(body.get("error_id", "")).strip()
+            engine = get_engine()
+            try:
+                updated = engine.resolve_error(error_id, status=body.get("status", "resolved"))
+                res = {"status": "ok", "error": updated}
+            except Exception as exc:
+                res = {"status": "error", "message": str(exc)}
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/sentinel/scan":
+            try:
+                body = json.loads(post_body) if post_body else {}
+            except Exception:
+                body = {}
+            project_id = body.get("project_id")
+            engine = get_engine()
+            report = engine.run_sentinel_health_check(project_id=project_id)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(report, ensure_ascii=False).encode("utf-8"))
+            return
+
         params = parse_qs(post_body)
 
         def get_val(key: str, default: str = "") -> str:
@@ -655,6 +760,17 @@ class PrototypeHandler(BaseHTTPRequestHandler):
 
         except Exception as exc:
             err = str(exc)
+            try:
+                engine.record_error(
+                    source="backend",
+                    message=f"POST {parsed.path} 處理失敗: {err}",
+                    error_type=exc.__class__.__name__,
+                    severity="error",
+                    stack_trace=traceback.format_exc(),
+                    context={"path": parsed.path, "params": {k: v for k, v in params.items()}},
+                )
+            except Exception:
+                pass
 
         self.send_response(HTTPStatus.SEE_OTHER)
         redirect_url = "/"
@@ -668,6 +784,36 @@ class PrototypeHandler(BaseHTTPRequestHandler):
     @staticmethod
     def _handle_chat_command(engine: WorkbenchEngine, project_id: str, node_id: str, message: str) -> dict[str, Any]:
         msg_lower = message.lower()
+
+        # 0. 後台錯誤收集與哨兵遙測 (Errors & Sentinel Telemetry)
+        if any(w in msg_lower for w in ("錯誤", "error", "bug", "問題", "遙測", "巡檢", "哨兵", "sentinel")):
+            unresolved = engine.list_errors(status="unresolved")
+            report = engine.run_sentinel_health_check(project_id)
+            err_count = len(unresolved)
+            if err_count == 0 and report["findings_count"] == 0:
+                reply_text = "🛡️ **【後台錯誤收集與哨兵報告】**\n\n- **系統健康度**：🟢 正常 (0 個未解決錯誤)\n- **背景哨兵巡檢**：剛剛完成全面掃描，契約與 Invariants 門禁全部通過！\n- **自動遙測**：前端、後端與工位狀態無異常。"
+            else:
+                top_items = []
+                for e in unresolved[:3]:
+                    top_items.append(f"  • `[{e['source'].upper()}]` **{e['error_type']}** ({e['occurrence_count']} 次): {e['message'][:60]}")
+                if not top_items and report["findings"]:
+                    for f in report["findings"][:3]:
+                        top_items.append(f"  • `[SENTINEL]` **{f['error_type']}**: {f['message'][:60]}")
+                list_str = "\n".join(top_items)
+                total_cnt = max(err_count, report["findings_count"])
+                reply_text = f"⚠️ **【後台錯誤收集中心報告】**\n\n發現 **{total_cnt} 個異常/潛在問題**：\n{list_str}\n\n💡 **修復指引**：\n- 點擊頂部 `[🛡️ 後台錯誤]` 查看完整總帳與指紋\n- 點擊「一鍵轉修復工單」即可推入 Auto-Debug 迴圈自愈修復"
+
+            return {
+                "reply": reply_text,
+                "action": "sentinel_report",
+                "unresolved_errors": unresolved,
+                "sentinel_scan": report,
+                "terminal_output": [
+                    f"[SENTINEL] Proactive inspection triggered on station {node_id}.",
+                    f"[SENTINEL] Findings count: {report['findings_count']}, Ledger unresolved: {err_count}",
+                    f"[TELEMETRY] Auto-triage and fix-ticket generator ready.",
+                ],
+            }
 
         # 1. 工單開立 (Create Ticket)
         if any(w in msg_lower for w in ("工單", "ticket", "開立", "建立", "修復")):

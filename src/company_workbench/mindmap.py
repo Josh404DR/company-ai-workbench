@@ -998,6 +998,185 @@ def render_agentos_mindmap_html():
       display: block;
       width: 45%;
     }}
+
+    /* ================================================================ */
+    /* 模式 D: 後台錯誤收集與哨兵抽屜 (Error Telemetry Drawer) */
+    /* ================================================================ */
+    .error-drawer {{
+      position: fixed;
+      top: 0;
+      right: -530px;
+      width: 500px;
+      height: 100vh;
+      background: rgba(17, 22, 32, 0.96);
+      backdrop-filter: blur(16px);
+      border-left: 2px solid var(--border-bright);
+      box-shadow: -10px 0 30px rgba(0, 0, 0, 0.7);
+      z-index: 1000;
+      transition: right 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+    }}
+    .error-drawer.open {{
+      right: 0;
+    }}
+    .err-drawer-header {{
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--card-bg);
+    }}
+    .err-drawer-header h3 {{
+      margin: 0;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-bright);
+    }}
+    .err-drawer-stats {{
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      padding: 12px 20px;
+      background: rgba(0,0,0,0.25);
+      border-bottom: 1px solid var(--border);
+    }}
+    .err-stat-card {{
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      text-align: center;
+    }}
+    .err-stat-num {{
+      font-size: 18px;
+      font-weight: 800;
+      color: #f85149;
+    }}
+    .err-stat-label {{
+      font-size: 10.5px;
+      color: var(--text-muted);
+    }}
+    .err-drawer-body {{
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }}
+    .err-card {{
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-left: 4px solid #f85149;
+      border-radius: 8px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+    }}
+    .err-card.warning {{
+      border-left-color: #f0883e;
+    }}
+    .err-card-top {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }}
+    .err-badge-src {{
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      background: rgba(248, 81, 73, 0.2);
+      color: #f85149;
+      border: 1px solid rgba(248, 81, 73, 0.4);
+    }}
+    .err-badge-src.sentinel {{
+      background: rgba(240, 136, 62, 0.2);
+      color: #f0883e;
+      border-color: rgba(240, 136, 62, 0.4);
+    }}
+    .err-badge-src.frontend {{
+      background: rgba(56, 139, 253, 0.2);
+      color: #388bfd;
+      border-color: rgba(56, 139, 253, 0.4);
+    }}
+    .err-badge-src.backend {{
+      background: rgba(163, 113, 247, 0.2);
+      color: #a371f7;
+      border-color: rgba(163, 113, 247, 0.4);
+    }}
+    .err-count-pill {{
+      font-size: 11px;
+      font-weight: 700;
+      background: rgba(255,255,255,0.08);
+      padding: 2px 8px;
+      border-radius: 10px;
+      color: var(--text-muted);
+    }}
+    .err-msg {{
+      font-size: 12.5px;
+      color: var(--text-bright);
+      line-height: 1.4;
+      font-weight: 500;
+      word-break: break-word;
+    }}
+    .err-details-toggle {{
+      font-size: 11px;
+      color: var(--text-muted);
+      cursor: pointer;
+    }}
+    .err-stack-box {{
+      margin-top: 6px;
+      font-family: monospace;
+      font-size: 11px;
+      background: #090d13;
+      padding: 8px;
+      border-radius: 4px;
+      color: #8b99ab;
+      max-height: 120px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }}
+    .err-actions {{
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+    }}
+    .btn-err-action {{
+      font-size: 11.5px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.15s;
+    }}
+    .btn-err-ticket {{
+      background: rgba(56, 139, 253, 0.15);
+      border-color: var(--blue);
+      color: #79c0ff;
+    }}
+    .btn-err-ticket:hover {{
+      background: var(--blue);
+      color: #fff;
+    }}
+    .btn-err-resolve {{
+      background: rgba(63, 185, 80, 0.15);
+      border-color: var(--green);
+      color: #7ee787;
+    }}
+    .btn-err-resolve:hover {{
+      background: var(--green);
+      color: #fff;
+    }}
   </style>
 </head>
 <body>
@@ -1055,8 +1234,41 @@ def render_agentos_mindmap_html():
       <button class="mode-tab" id="tab-universe" onclick="switchViewMode('universe')">
         🌌 全維度可視化
       </button>
+      <button class="mode-tab" id="tab-errors" onclick="toggleErrorDrawer()" style="background: rgba(248, 81, 73, 0.12); border-color: rgba(248, 81, 73, 0.4); color: #f85149;">
+        🛡️ 後台錯誤 (<span id="unresolved-err-badge">0</span>)
+      </button>
     </div>
   </header>
+
+  <!-- 模式 D: 後台錯誤收集與哨兵抽屜 (Error Telemetry Drawer) -->
+  <div class="error-drawer" id="error-drawer">
+    <div class="err-drawer-header">
+      <h3>🛡️ 後台錯誤收集與哨兵中心</h3>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btn-err-action" onclick="triggerSentinelScan()" style="background:rgba(240,136,62,0.2); border-color:#f0883e; color:#f0883e;">🔍 立即執行哨兵巡檢</button>
+        <button class="close-btn" onclick="toggleErrorDrawer()">✕</button>
+      </div>
+    </div>
+    <div class="err-drawer-stats">
+      <div class="err-stat-card">
+        <div class="err-stat-num" id="stat-unresolved-count">0</div>
+        <div class="err-stat-label">待處理異常</div>
+      </div>
+      <div class="err-stat-card">
+        <div class="err-stat-num" id="stat-total-occurrences" style="color:#d29922;">0</div>
+        <div class="err-stat-label">累計發生次數</div>
+      </div>
+      <div class="err-stat-card">
+        <div class="err-stat-num" id="stat-sentinel-status" style="color:#3fb950; font-size:14px; margin-top:2px;">PASS</div>
+        <div class="err-stat-label">背景哨兵防護</div>
+      </div>
+    </div>
+    <div class="err-drawer-body" id="err-drawer-list">
+      <div style="text-align:center; padding:30px; color:var(--text-muted);">
+        載入後台錯誤總帳中...
+      </div>
+    </div>
+  </div>
 
   <!-- 主工作台容器 (Main Container) -->
   <main class="main-container" id="main-container">
@@ -1303,6 +1515,8 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
     document.addEventListener("DOMContentLoaded", function() {{
       initVisNetwork();
       loadDatabaseState();
+      loadErrors();
+      setInterval(loadErrors, 10000);
       
       const chatInput = document.getElementById("chat-input");
       if (chatInput) {{
@@ -1655,6 +1869,216 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
     function escapeHtml(str) {{
       if (!str) return "";
       return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }}
+
+    // 7. 全域錯誤遙測與哨兵中心 (Global Error Telemetry & Sentinel Center)
+    function toggleErrorDrawer() {{
+      const drawer = document.getElementById("error-drawer");
+      if (drawer) {{
+        drawer.classList.toggle("open");
+        if (drawer.classList.contains("open")) {{
+          loadErrors();
+        }}
+      }}
+    }}
+
+    function reportClientError(source, errorType, message, stack, context) {{
+      try {{
+        fetch("/api/telemetry/errors", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{
+            source: source || "frontend",
+            error_type: errorType || "ClientError",
+            message: String(message || "Unknown error"),
+            stack_trace: stack || "",
+            context: Object.assign({{
+              url: window.location.href,
+              station: currentNodeId,
+              user_agent: navigator.userAgent
+            }}, context || {{}})
+          }})
+        }}).then(r => r.json()).then(data => {{
+          loadErrors();
+        }}).catch(e => {{}});
+      }} catch(err) {{}}
+    }}
+
+    window.addEventListener("error", function(e) {{
+      reportClientError("frontend", e.error ? e.error.name : "Error", e.message, e.error ? e.error.stack : (e.filename + ":" + e.lineno));
+    }});
+
+    window.addEventListener("unhandledrejection", function(e) {{
+      const reason = e.reason;
+      const msg = reason ? (reason.message || String(reason)) : "Unhandled Promise Rejection";
+      const stack = reason ? reason.stack : "";
+      reportClientError("frontend", "UnhandledRejection", msg, stack);
+    }});
+
+    async function loadErrors() {{
+      try {{
+        const resp = await fetch("/api/telemetry/errors");
+        const data = await resp.json();
+        
+        const badge = document.getElementById("unresolved-err-badge");
+        const statUnresolved = document.getElementById("stat-unresolved-count");
+        const statTotal = document.getElementById("stat-total-occurrences");
+        const statSentinel = document.getElementById("stat-sentinel-status");
+        const listContainer = document.getElementById("err-drawer-list");
+
+        const unresCount = data.unresolved_count || 0;
+        if (badge) badge.textContent = unresCount;
+        if (statUnresolved) statUnresolved.textContent = unresCount;
+
+        const errBtn = document.getElementById("tab-errors");
+        if (errBtn) {{
+          if (unresCount > 0) {{
+            errBtn.style.background = "rgba(248, 81, 73, 0.25)";
+            errBtn.style.borderColor = "#f85149";
+            errBtn.style.color = "#ff7b72";
+            errBtn.style.animation = "pulse 2s infinite";
+          }} else {{
+            errBtn.style.background = "rgba(255, 255, 255, 0.05)";
+            errBtn.style.borderColor = "var(--border)";
+            errBtn.style.color = "var(--text-muted)";
+            errBtn.style.animation = "none";
+          }}
+        }}
+
+        let totalOccur = 0;
+        let sentinelHasIssue = false;
+        (data.errors || []).forEach(e => {{
+          totalOccur += (e.occurrence_count || 1);
+          if (e.source === "sentinel" && e.status === "unresolved") sentinelHasIssue = true;
+        }});
+        if (statTotal) statTotal.textContent = totalOccur;
+        if (statSentinel) {{
+          if (sentinelHasIssue) {{
+            statSentinel.textContent = "WARN";
+            statSentinel.style.color = "#f0883e";
+          }} else {{
+            statSentinel.textContent = "PASS";
+            statSentinel.style.color = "#3fb950";
+          }}
+        }}
+
+        if (!listContainer) return;
+        if (!data.errors || data.errors.length === 0) {{
+          listContainer.innerHTML = `
+            <div style="text-align:center; padding:40px 20px; color:var(--text-muted);">
+              <div style="font-size:36px; margin-bottom:12px;">🟢</div>
+              <strong style="color:var(--text-bright);">後台無任何異常紀錄</strong>
+              <p style="font-size:12px; margin-top:6px;">前端操作、API 呼叫與背景哨兵均處於最佳狀態。</p>
+            </div>
+          `;
+          return;
+        }}
+
+        let cardsHtml = "";
+        data.errors.forEach(e => {{
+          const isResolved = e.status === "resolved";
+          const srcClass = e.source || "backend";
+          const sevClass = e.severity || "error";
+          const cardOpacity = isResolved ? "opacity:0.55;" : "";
+          
+          let stackHtml = "";
+          if (e.stack_trace) {{
+            stackHtml = `
+              <details style="margin-top:4px;">
+                <summary class="err-details-toggle">檢視呼叫棧追蹤 (Stack Trace)</summary>
+                <div class="err-stack-box">${{escapeHtml(e.stack_trace)}}</div>
+              </details>
+            `;
+          }}
+
+          let actionButtons = "";
+          if (!isResolved) {{
+            if (!e.ticket_id) {{
+              actionButtons += `<button class="btn-err-action btn-err-ticket" onclick="convertErrorToTicket('${{e.id}}')">🛠️ 一鍵轉修復工單</button>`;
+            }} else {{
+              actionButtons += `<span style="font-size:11px; color:#79c0ff; font-weight:600; padding:4px 0;">⤷ 已轉工單 #${{e.ticket_id}}</span>`;
+            }}
+            actionButtons += `<button class="btn-err-action btn-err-resolve" onclick="resolveError('${{e.id}}')">✓ 標記已解決</button>`;
+          }} else {{
+            actionButtons = `<span style="font-size:11.5px; color:#3fb950; font-weight:700;">✓ 已解決 (Resolved)</span>`;
+          }}
+
+          cardsHtml += `
+            <div class="err-card ${{sevClass}}" style="${{cardOpacity}}">
+              <div class="err-card-top">
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <span class="err-badge-src ${{srcClass}}">${{e.source.toUpperCase()}}</span>
+                  <span style="font-weight:700; font-size:12px; color:var(--text-bright);">${{escapeHtml(e.error_type)}}</span>
+                </div>
+                <span class="err-count-pill" title="重複發生次數">×${{e.occurrence_count}}</span>
+              </div>
+              <div class="err-msg">${{escapeHtml(e.message)}}</div>
+              <div style="font-size:10.5px; color:var(--text-muted); display:flex; justify-content:space-between;">
+                <span>指紋: <code>${{e.fingerprint}}</code></span>
+                <span>${{e.last_seen_at.substring(11, 19)}}</span>
+              </div>
+              ${{stackHtml}}
+              <div class="err-actions">
+                ${{actionButtons}}
+              </div>
+            </div>
+          `;
+        }});
+
+        listContainer.innerHTML = cardsHtml;
+      }} catch (err) {{
+        console.warn("無法取得 /api/telemetry/errors:", err);
+      }}
+    }}
+
+    async function triggerSentinelScan() {{
+      appendTerminalLine("[SENTINEL] Triggering proactive background sentinel scan...", "term-warn");
+      try {{
+        const resp = await fetch("/api/sentinel/scan", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{}})
+        }});
+        const data = await resp.json();
+        appendTerminalLine(`[SENTINEL] Scan complete. Found ${{data.findings_count}} findings.`, data.findings_count > 0 ? "term-warn" : "term-success");
+        loadErrors();
+      }} catch (err) {{
+        appendTerminalLine(`[SENTINEL-ERROR] ${{err}}`, "term-dim");
+      }}
+    }}
+
+    async function convertErrorToTicket(errId) {{
+      appendTerminalLine(`[AUTO-TRIAGE] Converting error ${{errId}} to atomic ticket...`, "term-info");
+      try {{
+        const resp = await fetch("/api/telemetry/errors/convert-ticket", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ error_id: errId, node_id: currentNodeId }})
+        }});
+        const res = await resp.json();
+        if (res.status === "ok") {{
+          appendTerminalLine(`[AUTO-TRIAGE] Ticket #${{res.ticket.id}} created: "${{res.ticket.title}}"`, "term-success");
+          loadErrors();
+          loadDatabaseState();
+          toggleErrorDrawer();
+          switchInspTab("tickets");
+        }} else {{
+          appendTerminalLine(`[AUTO-TRIAGE-ERROR] ${{res.message}}`, "term-warn");
+        }}
+      }} catch(err) {{
+        appendTerminalLine(`[AUTO-TRIAGE-ERROR] ${{err}}`, "term-dim");
+      }}
+    }}
+
+    async function resolveError(errId) {{
+      try {{
+        await fetch("/api/telemetry/errors/resolve", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ error_id: errId, status: "resolved" }})
+        }});
+        loadErrors();
+      }} catch(err) {{}}
     }}
   </script>
 </body>

@@ -40,6 +40,7 @@ class UiServerTestCase(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.temp_dir.cleanup()
+        ui_server.DB_PATH = ui_server.get_default_db_path()
 
     def request(self, method: str, path: str, data: dict | None = None) -> tuple[int, str, dict]:
         conn = http.client.HTTPConnection("127.0.0.1", self.port)
