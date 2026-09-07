@@ -696,6 +696,12 @@ def render_agentos_mindmap_html(project_id=None):
     }}
     .dim-val {{
       font-weight: 600;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      display: inline-block;
+      vertical-align: middle;
     }}
     .ladder-sep {{
       color: #48566a;
@@ -1090,8 +1096,8 @@ def render_agentos_mindmap_html(project_id=None):
     /* 左側：可對話視窗 (Conversational AI Station) */
     .chat-console {{
       flex: 1;
-      min-width: 420px;
-      max-width: 580px;
+      min-width: 320px;
+      max-width: 560px;
       background: var(--panel-bg);
       border-right: 1px solid var(--border);
       display: flex;
@@ -1341,10 +1347,10 @@ def render_agentos_mindmap_html(project_id=None):
     }}
     .task-metrics {{
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+      gap: 10px;
       background: var(--card-bg);
-      padding: 10px 14px;
+      padding: 10px 12px;
       border-radius: 6px;
       border: 1px solid var(--border);
     }}
@@ -1677,13 +1683,55 @@ def render_agentos_mindmap_html(project_id=None):
     /* 模式 C: 雙座分屏模式 (Split Mode) */
     /* ================================================================ */
     .split-view-active .workbench-view {{
-      width: 55%;
+      width: 54%;
+      min-width: 500px;
       border-right: 1px solid var(--border);
     }}
     .split-view-active .universe-view {{
       display: block;
-      width: 45%;
+      width: 46%;
+      min-width: 400px;
     }}
+    .split-view-active .chat-console {{
+      min-width: 260px;
+      max-width: 380px;
+    }}
+    .split-view-active .quick-action-bar {{
+      padding: 6px 10px;
+      gap: 5px;
+    }}
+    .split-view-active .q-btn {{
+      padding: 4px 7px;
+      font-size: 10.5px;
+    }}
+    .split-view-active .dimension-workplace {{
+      padding: 10px 14px;
+      gap: 10px;
+    }}
+    .split-view-active .task-overview-card {{
+      padding: 10px 12px;
+    }}
+    .split-view-active .universe-toolbar {{
+      padding: 6px 10px;
+      gap: 6px;
+      top: 8px;
+      left: 8px;
+      right: 8px;
+    }}
+    .split-view-active .filter-label {{
+      display: none;
+    }}
+    .split-view-active .f-btn {{
+      padding: 3px 6px;
+      font-size: 10.5px;
+    }}
+    .split-view-active .node-flyout-card {{
+      width: 290px;
+      bottom: 12px;
+      right: 12px;
+      padding: 12px;
+    }}
+
 
     /* ================================================================ */
     /* 模式 D: 後台錯誤收集與哨兵抽屜 (Error Telemetry Drawer) */
@@ -1863,6 +1911,83 @@ def render_agentos_mindmap_html(project_id=None):
       background: var(--green);
       color: #fff;
     }}
+
+    /* 現代低阻力自訂滾動條 (Sleek Modern Scrollbars) */
+    ::-webkit-scrollbar {{
+      width: 6px;
+      height: 6px;
+    }}
+    ::-webkit-scrollbar-track {{
+      background: rgba(0, 0, 0, 0.15);
+    }}
+    ::-webkit-scrollbar-thumb {{
+      background: #2a384e;
+      border-radius: 4px;
+    }}
+    ::-webkit-scrollbar-thumb:hover {{
+      background: #3f5270;
+    }}
+
+    /* 程式碼與憑證防破版 (Code & Evidence Overflow Protection) */
+    .code-highlight {{
+      word-break: break-all;
+      overflow-wrap: anywhere;
+    }}
+    .evidence-box {{
+      overflow-x: auto;
+      max-width: 100%;
+    }}
+    #tickets-table-container {{
+      overflow-x: auto;
+      max-width: 100%;
+    }}
+
+    /* 品牌副標與按鈕自適應 (Brand Subtitle & Responsive Breakpoints) */
+    .brand-subtitle {{
+      color: var(--text-muted);
+      font-weight: 400;
+      font-size: 13px;
+    }}
+
+    @media (max-width: 1400px) {{
+      .brand-subtitle {{
+        display: none;
+      }}
+      .dim-val {{
+        max-width: 90px;
+      }}
+    }}
+
+    @media (max-width: 1200px) {{
+      .badge-sub {{
+        display: none;
+      }}
+      .ladder-step[data-dim="layer"] .dim-val,
+      .ladder-step[data-dim="gate"] .dim-val {{
+        max-width: 70px;
+      }}
+      .top-bar {{
+        padding: 0 12px;
+        gap: 8px;
+      }}
+      .mode-tab {{
+        padding: 5px 8px;
+        font-size: 11px;
+      }}
+    }}
+
+    @media (max-width: 1024px) {{
+      .split-view-active .workbench-view {{
+        width: 100%;
+        border-right: none;
+      }}
+      .split-view-active .universe-view {{
+        display: none;
+      }}
+      .chat-console {{
+        min-width: 280px;
+      }}
+    }}
   </style>
 </head>
 <body>
@@ -1872,7 +1997,7 @@ def render_agentos_mindmap_html(project_id=None):
     <div class="brand">
       <span class="logo-icon">🐋</span>
       <div class="brand-text">
-        <h1>Company AI Workbench · 日產精工裝配駕駛艙 <span class="badge-sub">Orca 精工工作台</span></h1>
+        <h1>Company AI Workbench <span class="brand-subtitle">· 日產精工裝配駕駛艙</span> <span class="badge-sub">Orca 精工工作台</span></h1>
       </div>
     </div>
 
