@@ -550,11 +550,14 @@ def generate_project_graph_data(project_name: str, root_path: str | Path | None 
 
 def render_agentos_mindmap_html(project_id=None):
     nodes, edges = None, None
+    prj_name = "AgentOS Lite"
     if project_id and project_id != "all":
         try:
             from .ui_server import get_engine
             eng = get_engine()
             prj = eng.get_project(project_id)
+            if prj:
+                prj_name = prj["name"]
             ws = eng.get_workspace(prj["workspace_id"]) if prj.get("workspace_id") else None
             root_p = ws.get("root_path") if ws else None
             nodes, edges = generate_project_graph_data(prj["name"], root_path=root_p)
@@ -564,6 +567,18 @@ def render_agentos_mindmap_html(project_id=None):
         nodes, edges = get_agentos_graph_data()
     nodes_json = json.dumps(nodes, ensure_ascii=False)
     edges_json = json.dumps(edges, ensure_ascii=False)
+
+    init_active_node = next(
+        (n for n in nodes if "active_station" in n["id"] or "焦點工位" in n["label"] or "task_n4" in n["id"] or n.get("level") == 3),
+        nodes[0] if nodes else {"id": "task_n4", "label": "N4 沙盒重構工位", "layer": "階段三：任務流水線", "summary": "", "details": ""}
+    )
+    init_node_id = init_active_node["id"]
+    init_node_label = init_active_node["label"]
+    init_node_layer = init_active_node.get("layer", "階段三：任務流水線")
+    init_node_desc = (init_active_node.get("summary", "") + (" " + init_active_node.get("details", "") if init_active_node.get("details") else "")).strip()
+    if not init_node_desc:
+        init_node_desc = "覆蓋任務維度至原子工單維度，提供本工位沙盒試車、規格審計與修復推進。"
+    init_node_short = init_node_label.split(" ")[1] if " " in init_node_label else init_node_label
 
     return f"""<!DOCTYPE html>
 <html lang="zh-TW">
@@ -1896,25 +1911,25 @@ def render_agentos_mindmap_html(project_id=None):
       <div class="ladder-step" data-dim="goal" title="長期目標維度">
         <span class="dim-icon">🎯</span>
         <span class="dim-name">目標</span>
-        <span class="dim-val" id="ladder-goal-title">核心架構重構</span>
+        <span class="dim-val" id="ladder-goal-title">{html.escape(prj_name)} 核心架構演進</span>
       </div>
       <span class="ladder-sep">›</span>
       <div class="ladder-step" data-dim="task" title="中小型任務維度">
         <span class="dim-icon">📦</span>
         <span class="dim-name">任務</span>
-        <span class="dim-val" id="ladder-task-title">Phase 1 契約門禁</span>
+        <span class="dim-val" id="ladder-task-title">{html.escape(init_node_label)}</span>
       </div>
       <span class="ladder-sep">›</span>
       <div class="ladder-step active" data-dim="node" title="工位節點維度">
         <span class="dim-icon">📍</span>
         <span class="dim-name">節點</span>
-        <span class="dim-val" id="ladder-node-title">N4 沙盒重構</span>
+        <span class="dim-val" id="ladder-node-title">{html.escape(init_node_short)}</span>
       </div>
       <span class="ladder-sep">›</span>
       <div class="ladder-step" data-dim="ticket" title="原子工單維度">
         <span class="dim-icon">⚛️</span>
         <span class="dim-name">原子</span>
-        <span class="dim-val" id="ladder-ticket-title">#TKT-104 [沙盒極限試車]</span>
+        <span class="dim-val" id="ladder-ticket-title">(待開立工單)</span>
       </div>
     </nav>
 
@@ -1950,22 +1965,22 @@ def render_agentos_mindmap_html(project_id=None):
         <div class="err-stat-label">待處理異常</div>
       </div>
       <div class="err-stat-card">
-        <div class="err-stat-num" id="stat-total-occurrences" style="color:#d29922;">0</div>
-        <div class="err-stat-label">累計發生次數</div>
+        <div class="err-stat-num" id="stat-total-count" style="color:var(--text-bright);">0</div>
+        <div class="err-stat-label">歷史累積錯誤</div>
       </div>
       <div class="err-stat-card">
         <div class="err-stat-num" id="stat-sentinel-status" style="color:#3fb950; font-size:14px; margin-top:2px;">PASS</div>
         <div class="err-stat-label">背景哨兵防護</div>
       </div>
     </div>
-    <div class="err-drawer-body" id="err-drawer-list">
-      <div style="text-align:center; padding:30px; color:var(--text-muted);">
-        載入後台錯誤總帳中...
+    <div class="err-drawer-list" id="error-list-container">
+      <div style="text-align:center; padding:32px 16px; color:var(--text-muted); font-size:12px;">
+        正在取得系統哨兵異常記錄...
       </div>
     </div>
   </div>
 
-  <!-- 主工作台容器 (Main Container) -->
+  <!-- 主容器 (支援 Flex 水平並排 雙座分屏) -->
   <main class="main-container" id="main-container">
     
     <!-- === 模式 A: ORCA 精工工作台 (Orca Workbench) === -->
@@ -1976,7 +1991,7 @@ def render_agentos_mindmap_html(project_id=None):
         <div class="console-header">
           <div class="station-badge">
             <span class="pulse-dot"></span>
-            <span id="active-station-label">🎯 當前工位：N4 沙盒重構工位 [階段四：執行與驗證]</span>
+            <span id="active-station-label">🎯 當前工位：{html.escape(init_node_label)} [{html.escape(init_node_layer)}]</span>
           </div>
           <div class="console-meta">
             <span class="tag tag-runner">⚡ Codex Runner</span>
@@ -1987,16 +2002,16 @@ def render_agentos_mindmap_html(project_id=None):
         <!-- 對話訊息串 (Dialogue Stream) -->
         <div class="chat-stream" id="chat-stream">
           <!-- 系統歡迎與當前工位卡片 -->
-          <div class="chat-card chat-assistant">
+          <div class="chat-card chat-assistant" id="assistant-welcome-card">
             <div class="card-avatar">🐋</div>
             <div class="card-body">
               <div class="card-header">
                 <strong>Orca 工作台助理</strong>
                 <span class="card-time">10:00:00</span>
               </div>
-              <div class="card-text">
-                已鎖定工位 <code>task_n4 (N4 沙盒重構工位)</code>。<br>
-                已加載 <strong>Contract Linter 47 題規則庫</strong> 與 <strong>Invariant 14 門禁基線</strong>。<br>
+              <div class="card-text" id="chat-welcome-text">
+                已鎖定工位 <code>{html.escape(init_node_label)}</code> [{html.escape(init_node_layer)}]。<br>
+                已加載 <strong>{html.escape(prj_name)}</strong> 專案架構（共 {len(nodes)} 個架構節點與門禁基線）。<br>
                 本工作台覆蓋<strong>任務維度到原子維度</strong>，你可以直接下達指令，或點擊下方一鍵裝配工令：
               </div>
             </div>
@@ -2026,15 +2041,15 @@ def render_agentos_mindmap_html(project_id=None):
         <div class="task-overview-card">
           <div class="task-card-header">
             <div>
-              <span class="badge-phase" id="task-phase-badge">階段四：執行與驗證</span>
-              <h2 id="task-title-heading">N4 沙盒重構與 Verifier 獨立隔離門禁</h2>
+              <span class="badge-phase" id="task-phase-badge">{html.escape(init_node_layer)}</span>
+              <h2 id="task-title-heading">{html.escape(init_node_label)}</h2>
             </div>
             <div class="task-card-status">
               <span class="status-pill status-ready" id="task-status-pill">● 待裝配 (READY)</span>
             </div>
           </div>
           <p class="task-desc" id="task-desc-text">
-            透過臨時 Git Worktree 隔離環境重構 N4 產物邊界，要求 Contract Linter 達到 error_count=0 且符合 Invariant 14 數位憑證要求。
+            {html.escape(init_node_desc)}
           </p>
           <div class="task-metrics">
             <div class="metric-item">
@@ -2375,6 +2390,30 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
 
       const taskDesc = document.getElementById("task-desc-text");
       if (taskDesc) taskDesc.textContent = summary + (details ? (" " + details) : "");
+
+      // 動態更新助理歡迎卡片與工位鎖定說明
+      const welcomeCard = document.getElementById("chat-welcome-text");
+      if (welcomeCard) {{
+        const prjName = (cachedAllProjects.find(p => p.id === currentProjectId) || {{}}).name || (document.getElementById("ladder-project-title") ? document.getElementById("ladder-project-title").textContent.trim() : "當前專案");
+        const count = (RAW_NODES && RAW_NODES.length) || 16;
+        welcomeCard.innerHTML = `已鎖定工位 <code>${{escapeHtml(lbl)}}</code> [${{escapeHtml(layer)}}]。<br>` +
+          `已加載 <strong>${{escapeHtml(prjName)}}</strong> 專案架構（共 ${{count}} 個架構節點與門禁基線）。<br>` +
+          `本工作台覆蓋<strong>任務維度到原子維度</strong>，你可以直接下達指令，或點擊下方一鍵裝配工令：`;
+      }}
+
+      // 天眼畫布自動定位 (Auto-Locate and Focus to Selected Station Node)
+      if (network && visNodes && nodeObj && nodeObj.id) {{
+        try {{
+          network.selectNodes([nodeObj.id]);
+          network.focus(nodeObj.id, {{
+            scale: 1.15,
+            animation: {{
+              duration: 500,
+              easingFunction: "easeInOutQuad"
+            }}
+          }});
+        }} catch (err) {{}}
+      }}
     }}
 
     function formatDbNodesToVis(dbNodes) {{
@@ -3235,21 +3274,18 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
         }}
 
         // 渲染專案切換標題與階梯麵包屑
+        const curPrjName = (data.project && data.project.name) || "專案";
         const prjTitle = document.getElementById("ladder-project-title");
         if (prjTitle) {{
-          prjTitle.textContent = (data.project && data.project.name) || "專案";
+          prjTitle.textContent = curPrjName;
         }}
         const goalTitle = document.getElementById("ladder-goal-title");
         if (goalTitle) {{
-          goalTitle.textContent = (data.goals && data.goals.length > 0) ? data.goals[0].title : "核心架構重構";
-        }}
-        const taskTitle = document.getElementById("ladder-task-title");
-        if (taskTitle) {{
-          taskTitle.textContent = (data.tickets && data.tickets.length > 0) ? data.tickets[0].title : "Phase 1 契約門禁";
+          goalTitle.textContent = (data.goals && data.goals.length > 0) ? data.goals[0].title : `${{curPrjName}} 核心架構演進`;
         }}
         const tktTitle = document.getElementById("ladder-ticket-title");
         if (tktTitle) {{
-          tktTitle.textContent = (data.tickets && data.tickets.length > 0) ? (`#TKT-${{data.tickets[0].id}} [${{data.tickets[0].title}}]`) : "#TKT-104 [沙盒極限試車]";
+          tktTitle.textContent = (data.tickets && data.tickets.length > 0) ? (`#TKT-${{data.tickets[0].id}} [${{data.tickets[0].title}}]`) : "(待開立工單)";
         }}
         const tktPill = document.getElementById("task-status-pill");
         if (tktPill) {{
@@ -3268,9 +3304,13 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
             visEdges.add(graph.edges);
             network.fit();
           }}
-          const activeNode = RAW_NODES.find(n => n.id.includes("n4") || n.label.includes("N4") || n.level === 3) || RAW_NODES[0];
+          const activeNode = RAW_NODES.find(n => n.id.includes("active_station") || n.label.includes("焦點工位") || n.id.includes("task_n4") || n.label.includes("N4") || n.level === 3) || RAW_NODES[0];
           if (activeNode) {{
             switchActiveStation(activeNode);
+            const taskTitle = document.getElementById("ladder-task-title");
+            if (taskTitle) {{
+              taskTitle.textContent = (data.tickets && data.tickets.length > 0) ? data.tickets[0].title : activeNode.label;
+            }}
           }}
         }} else if (!data.nodes || data.nodes.length === 0) {{
           RAW_NODES = [];
