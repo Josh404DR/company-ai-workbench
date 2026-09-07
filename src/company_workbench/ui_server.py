@@ -207,9 +207,16 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                     for t in tickets:
                         t["project_name"] = prj_map.get(t["project_id"], prj["name"])
                     nodes = engine.list_nodes(project_id)
-                    if not nodes and target_ws and target_ws.get("root_path"):
+                    is_agentos_project = prj["name"].lower() in ("agentos-lite", "agentos", "agentos lite")
+                    is_contaminated = (
+                        not is_agentos_project
+                        and any("AgentOS-Lite" in n.get("title", "") or "Contract Linter" in n.get("title", "") for n in nodes)
+                    )
+                    if (not nodes or is_contaminated) and target_ws and target_ws.get("root_path"):
                         try:
-                            nodes = engine.sync_agentos_mindmap_nodes(project_id, root_path=target_ws.get("root_path"))
+                            nodes = engine.sync_agentos_mindmap_nodes(
+                                project_id, root_path=target_ws.get("root_path"), force_refresh=True
+                            )
                         except Exception:
                             pass
                 else:
@@ -315,6 +322,17 @@ class PrototypeHandler(BaseHTTPRequestHandler):
         if (parsed.path in ("/", "/cockpit", "/agentos-map", "/map")) and ("view=classic" not in parsed.query):
             params = parse_qs(parsed.query)
             prj_param = params.get("project_id", [None])[0]
+            if not prj_param:
+                try:
+                    engine = get_engine()
+                    wss = engine.list_workspaces()
+                    prjs = []
+                    for w in wss:
+                        prjs.extend(engine.list_projects(w["id"], include_archived=False))
+                    if prjs:
+                        prj_param = prjs[-1]["id"]
+                except Exception:
+                    pass
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -825,6 +843,44 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                     res = {"status": "ok", "project": updated}
                 except Exception as exc:
                     res = {"status": "error", "message": str(exc)}
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/project/resync-mindmap":
+            try:
+                body = json.loads(post_body)
+            except Exception:
+                parsed_dict = parse_qs(post_body)
+                body = {k: v[0] for k, v in parsed_dict.items()}
+            prj_id = str(body.get("project_id", "")).strip()
+            engine = get_engine()
+            workspaces = engine.list_workspaces()
+            all_projects = []
+            for w in workspaces:
+                all_projects.extend(engine.list_projects(w["id"], include_archived=True))
+            prj = next((p for p in all_projects if p["id"] == prj_id), None) if prj_id else None
+            if not prj and all_projects:
+                prj = all_projects[-1]
+            if not prj:
+                res = {"status": "error", "message": "找不到指定專案"}
+            else:
+                ws = next((w for w in workspaces if w["id"] == prj.get("workspace_id")), None)
+                root_path = ws.get("root_path") if ws else None
+                try:
+                    nodes = engine.sync_agentos_mindmap_nodes(prj["id"], root_path=root_path, force_refresh=True)
+                    res = {
+                        "status": "ok",
+                        "project_id": prj["id"],
+                        "project_name": prj["name"],
+                        "nodes_count": len(nodes),
+                        "nodes": nodes,
+                        "message": f"成功重新掃描並同步專案「{prj['name']}」架構圖譜（共 {len(nodes)} 個節點）！",
+                    }
+                except Exception as exc:
+                    res = {"status": "error", "message": f"掃描失敗: {exc}"}
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()

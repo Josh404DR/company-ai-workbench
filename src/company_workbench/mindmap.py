@@ -549,7 +549,19 @@ def generate_project_graph_data(project_name: str, root_path: str | Path | None 
 
 
 def render_agentos_mindmap_html(project_id=None):
-    nodes, edges = get_agentos_graph_data()
+    nodes, edges = None, None
+    if project_id and project_id != "all":
+        try:
+            from .ui_server import get_engine
+            eng = get_engine()
+            prj = eng.get_project(project_id)
+            ws = eng.get_workspace(prj["workspace_id"]) if prj.get("workspace_id") else None
+            root_p = ws.get("root_path") if ws else None
+            nodes, edges = generate_project_graph_data(prj["name"], root_path=root_p)
+        except Exception:
+            pass
+    if not nodes or not edges:
+        nodes, edges = get_agentos_graph_data()
     nodes_json = json.dumps(nodes, ensure_ascii=False)
     edges_json = json.dumps(edges, ensure_ascii=False)
 
@@ -2163,6 +2175,7 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
           <button class="f-btn" onclick="filterUniverse(5, this)">維度 5：主幹交付</button>
         </div>
         <div class="universe-actions">
+          <button class="f-btn" id="btn-resync-mindmap" onclick="resyncCurrentMindmap()" title="從本機工作區即時重新掃描專案架構並刷新心智圖">🔄 重新掃描架構</button>
           <button class="f-btn" onclick="resetUniverseView()">⟲ 重設視角</button>
         </div>
       </div>
@@ -2433,12 +2446,72 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
       }});
 
       if (edges.length === 0 && formatted.length > 1) {{
-        for (let i = 0; i < formatted.length - 1; i++) {{
+        const lvlNodes = {{ 1: [], 2: [], 3: [], 4: [], 5: [] }};
+        formatted.forEach(n => {{
+          const l = n.level || 3;
+          if (!lvlNodes[l]) lvlNodes[l] = [];
+          lvlNodes[l].push(n);
+        }});
+        // Level 1 -> Level 2
+        (lvlNodes[1] || []).forEach(n1 => {{
+          (lvlNodes[2] || []).slice(0, 3).forEach(n2 => {{
+            edges.push({{
+              from: n1.id,
+              to: n2.id,
+              arrows: "to",
+              color: {{ color: "#30363d", highlight: "#f0883e" }},
+              smooth: {{ type: "cubicBezier", forceDirection: "horizontal", roundness: 0.4 }}
+            }});
+          }});
+        }});
+        // Level 2 -> Level 3
+        (lvlNodes[2] || []).slice(0, 3).forEach(n2 => {{
+          (lvlNodes[3] || []).forEach(n3 => {{
+            edges.push({{
+              from: n2.id,
+              to: n3.id,
+              arrows: "to",
+              color: {{ color: "#30363d", highlight: "#f0883e" }},
+              smooth: {{ type: "cubicBezier", forceDirection: "horizontal", roundness: 0.4 }}
+            }});
+          }});
+        }});
+        // Level 3 -> Level 4
+        (lvlNodes[3] || []).forEach(n3 => {{
+          (lvlNodes[4] || []).forEach(n4 => {{
+            edges.push({{
+              from: n3.id,
+              to: n4.id,
+              arrows: "to",
+              color: {{ color: "#f0883e" }},
+              width: 2,
+              smooth: {{ type: "cubicBezier", forceDirection: "horizontal", roundness: 0.4 }}
+            }});
+          }});
+        }});
+        // Level 4 -> Level 5 (acceptance)
+        (lvlNodes[4] || []).forEach(n4 => {{
+          const acceptance = (lvlNodes[5] || []).find(n => n.id.includes("acceptance") || n.label.includes("驗收")) || (lvlNodes[5] || [])[0];
+          if (acceptance) {{
+            edges.push({{
+              from: n4.id,
+              to: acceptance.id,
+              arrows: "to",
+              color: {{ color: "#3fb950" }},
+              smooth: {{ type: "cubicBezier", forceDirection: "horizontal", roundness: 0.4 }}
+            }});
+          }}
+        }});
+        // Within Level 5: acceptance -> deliver
+        const acc = (lvlNodes[5] || []).find(n => n.id.includes("acceptance") || n.label.includes("驗收"));
+        const del = (lvlNodes[5] || []).find(n => n.id.includes("deliver") || n.label.includes("交付") || n.label.includes("main"));
+        if (acc && del && acc.id !== del.id) {{
           edges.push({{
-            from: formatted[i].id,
-            to: formatted[i+1].id,
+            from: acc.id,
+            to: del.id,
             arrows: "to",
-            color: {{ color: "#30363d", highlight: "#f0883e" }},
+            color: {{ color: "#238636" }},
+            width: 3,
             smooth: {{ type: "cubicBezier", forceDirection: "horizontal", roundness: 0.4 }}
           }});
         }}
@@ -2786,6 +2859,30 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
       loadDatabaseState(prjId);
       if (autoSwitchView && activeViewMode === "workbench") {{
         switchViewMode("split");
+      }}
+    }}
+
+    async function resyncCurrentMindmap() {{
+      if (!currentProjectId || currentProjectId === "all") {{
+        alert("請先選取具體專案以執行架構掃描");
+        return;
+      }}
+      appendTerminalLine(`[MINDMAP-SYNC] 正在即時重新掃描專案 ${{currentProjectId}} 之實體目錄與架構...`, "term-warn");
+      try {{
+        const resp = await fetch("/api/project/resync-mindmap", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ project_id: currentProjectId }})
+        }});
+        const data = await resp.json();
+        if (data.status === "ok") {{
+          appendTerminalLine(`[MINDMAP-SYNC] ${{data.message}}`, "term-success");
+          loadDatabaseState(currentProjectId);
+        }} else {{
+          appendTerminalLine(`[MINDMAP-SYNC-ERROR] ${{data.message}}`, "term-warn");
+        }}
+      }} catch (err) {{
+        appendTerminalLine(`[MINDMAP-SYNC-ERROR] 通訊失敗: ${{err.message}}`, "term-dim");
       }}
     }}
 

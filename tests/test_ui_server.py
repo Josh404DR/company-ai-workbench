@@ -368,6 +368,14 @@ class ProjectSwitcherTestCase(unittest.TestCase):
         self.assertEqual("error", data.get("status"))
         self.assertIn("請輸入", data.get("message", ""))
 
+        # 12. Test POST /api/project/resync-mindmap
+        status, data = self.request_json("/api/project/resync-mindmap", {
+            "project_id": self.prj["id"],
+        })
+        self.assertEqual(200, status)
+        self.assertEqual("ok", data.get("status"))
+        self.assertGreaterEqual(data.get("nodes_count", 0), 10)
+
 
 if __name__ == "__main__":
     unittest.main()
