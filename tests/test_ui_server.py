@@ -325,6 +325,8 @@ class ProjectSwitcherTestCase(unittest.TestCase):
         self.assertIn("modal-new-project", body)
         self.assertIn("tab-btn-local", body)
         self.assertIn("tab-btn-github", body)
+        self.assertIn("badge-acc-josh404", body)
+        self.assertIn("badge-acc-sayajosh", body)
         self.assertIn("openNewProjectModal()", body)
 
         # 9. Test GET /api/project/candidates
@@ -353,9 +355,14 @@ class ProjectSwitcherTestCase(unittest.TestCase):
             self.assertEqual(imported_prj_id, state_imp["project"]["id"])
             self.assertGreaterEqual(len(state_imp["nodes"]), 10)
 
+            # Verify GET / with project_id parameter
+            status, body, _ = self.request("GET", f"/?project_id={imported_prj_id}")
+            self.assertEqual(200, status)
+
         # 11. Test POST /api/project/import-github validation
         status, data = self.request_json("/api/project/import-github", {
             "repo": "",
+            "account": "sayaJosh",
         })
         self.assertEqual(200, status)
         self.assertEqual("error", data.get("status"))

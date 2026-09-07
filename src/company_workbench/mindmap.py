@@ -225,7 +225,7 @@ def get_agentos_graph_data():
     return nodes, edges
 
 
-def render_agentos_mindmap_html():
+def render_agentos_mindmap_html(project_id=None):
     nodes, edges = get_agentos_graph_data()
     nodes_json = json.dumps(nodes, ensure_ascii=False)
     edges_json = json.dumps(edges, ensure_ascii=False)
@@ -657,6 +657,37 @@ def render_agentos_mindmap_html():
       opacity: 0.5;
       cursor: not-allowed;
     }}
+
+    .account-badge-group {{
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }}
+    .account-badge-card {{
+      flex: 1;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #0d1117;
+      font-size: 11.5px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+      user-select: none;
+    }}
+    .account-badge-card:hover {{
+      border-color: var(--border-bright);
+      background: rgba(255, 255, 255, 0.04);
+    }}
+    .account-badge-card.active {{
+      border-color: #388bfd;
+      background: rgba(56, 139, 253, 0.15);
+      color: var(--text-bright);
+      font-weight: 700;
+    }}
+
 
     /* 模式切換標籤頁 (View Mode Switcher) */
     .view-mode-tabs {{
@@ -1907,6 +1938,27 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
             </div>
           </div>
           <div class="form-group">
+            <label>GitHub 操作身份 (GitHub Account):</label>
+            <div class="account-badge-group">
+              <label class="account-badge-card active" id="badge-acc-josh404">
+                <input type="radio" name="gh-account" value="Josh404DR" checked onchange="switchGhAccount('Josh404DR')" />
+                <span>👤 Josh404DR (主帳號)</span>
+              </label>
+              <label class="account-badge-card" id="badge-acc-sayajosh">
+                <input type="radio" name="gh-account" value="sayaJosh" onchange="switchGhAccount('sayaJosh')" />
+                <span>👤 sayaJosh</span>
+              </label>
+              <label class="account-badge-card" id="badge-acc-custom">
+                <input type="radio" name="gh-account" value="custom" onchange="switchGhAccount('custom')" />
+                <span>➕ 自訂 Token</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-group" id="group-gh-token" style="display:none;">
+            <label>Personal Access Token (PAT):</label>
+            <input type="password" class="form-input" id="input-gh-token" placeholder="ghp_... 或 github_pat_..." />
+          </div>
+          <div class="form-group">
             <label>本機存放目錄名稱 (Target Folder):</label>
             <input type="text" class="form-input" id="input-gh-folder" placeholder="例如：scc-sys" />
           </div>
@@ -1946,8 +1998,9 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
 
   <!-- JavaScript 核心控制邏輯 -->
   <script>
-    const RAW_NODES = {nodes_json};
-    const RAW_EDGES = {edges_json};
+    let RAW_NODES = {nodes_json};
+    let RAW_EDGES = {edges_json};
+    const DEFAULT_EDGES = {edges_json};
 
     let currentNodeId = "task_n4";
     let activeViewMode = "workbench";
@@ -1955,10 +2008,128 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
     let visNodes = null;
     let visEdges = null;
 
+    function switchGhAccount(acc) {{
+      ["josh404", "sayajosh", "custom"].forEach(k => {{
+        const el = document.getElementById("badge-acc-" + k);
+        if (el) el.classList.toggle("active", (k === "josh404" && acc === "Josh404DR") || (k === "sayajosh" && acc === "sayaJosh") || (k === "custom" && acc === "custom"));
+      }});
+      const tokenGroup = document.getElementById("group-gh-token");
+      if (tokenGroup) tokenGroup.style.display = (acc === "custom") ? "block" : "none";
+    }}
+
+    function switchActiveStation(nodeObj) {{
+      if (!nodeObj) return;
+      currentNodeId = nodeObj.id;
+      const lbl = nodeObj.label || nodeObj.title || "未知工位";
+      const layer = nodeObj.layer || "任務維度";
+      const summary = nodeObj.summary || "";
+      const details = nodeObj.details || "";
+
+      const activeSt = document.getElementById("active-station-label");
+      if (activeSt) activeSt.textContent = `🎯 當前工位：${{lbl}} [${{layer}}]`;
+
+      const ladderNode = document.getElementById("ladder-node-title");
+      if (ladderNode) ladderNode.textContent = lbl.split(" ")[1] || lbl;
+
+      const taskHeading = document.getElementById("task-title-heading");
+      if (taskHeading) taskHeading.textContent = lbl;
+
+      const phaseBadge = document.getElementById("task-phase-badge");
+      if (phaseBadge) phaseBadge.textContent = layer;
+
+      const taskDesc = document.getElementById("task-desc-text");
+      if (taskDesc) taskDesc.textContent = summary + (details ? (" " + details) : "");
+    }}
+
+    function formatDbNodesToVis(dbNodes) {{
+      if (!dbNodes || dbNodes.length === 0) return {{ nodes: [], edges: [] }};
+      
+      const layerLevelMap = {{
+        "memory": 1,
+        "architecture": 1,
+        "logic": 2,
+        "milestone": 3,
+        "task": 4,
+        "delivery": 5
+      }};
+
+      const formatted = dbNodes.map(n => {{
+        const meta = n.metadata || {{}};
+        const lvl = meta.level || layerLevelMap[n.layer] || 3;
+        const clr = meta.color || (lvl === 1 ? '#8957e5' : (lvl === 2 ? '#1f6feb' : (lvl === 3 ? '#238636' : (lvl === 4 ? '#f0883e' : '#3fb950'))));
+        return {{
+          id: n.id,
+          label: n.title,
+          level: lvl,
+          color: {{
+            background: clr,
+            border: n.id === currentNodeId ? "#f0883e" : "#30363d",
+            highlight: {{ background: clr, border: "#f0883e" }}
+          }},
+          shape: "box",
+          margin: 10,
+          font: {{ color: "#ffffff", size: 12, face: "system-ui" }},
+          borderWidth: n.id === currentNodeId ? 3 : 1,
+          shadow: n.id === currentNodeId ? {{ enabled: true, color: "rgba(240, 136, 62, 0.4)", size: 10 }} : false,
+          rawData: {{
+            id: n.id,
+            label: n.title,
+            layer: n.layer,
+            level: lvl,
+            summary: n.summary || "",
+            details: n.details || "",
+            files: n.files || [],
+            color: clr
+          }}
+        }};
+      }});
+
+      const idMap = {{}};
+      dbNodes.forEach(n => {{
+        idMap[n.id] = n.id;
+        const parts = n.id.split("-");
+        if (parts.length > 2) {{
+          idMap[parts.slice(2).join("-")] = n.id;
+        }}
+      }});
+
+      let edges = [];
+      DEFAULT_EDGES.forEach(e => {{
+        const fromId = idMap[e.from] || (dbNodes.find(n => n.id.endsWith(e.from)) || {{}}).id;
+        const toId = idMap[e.to] || (dbNodes.find(n => n.id.endsWith(e.to)) || {{}}).id;
+        if (fromId && toId && fromId !== toId) {{
+          edges.push({{
+            ...e,
+            from: fromId,
+            to: toId,
+            arrows: "to",
+            color: e.color || {{ color: "#30363d", highlight: "#f0883e" }},
+            smooth: {{ type: "cubicBezier", forceDirection: "horizontal", roundness: 0.4 }}
+          }});
+        }}
+      }});
+
+      if (edges.length === 0 && formatted.length > 1) {{
+        for (let i = 0; i < formatted.length - 1; i++) {{
+          edges.push({{
+            from: formatted[i].id,
+            to: formatted[i+1].id,
+            arrows: "to",
+            color: {{ color: "#30363d", highlight: "#f0883e" }},
+            smooth: {{ type: "cubicBezier", forceDirection: "horizontal", roundness: 0.4 }}
+          }});
+        }}
+      }}
+
+      return {{ nodes: formatted, edges: edges }};
+    }}
+
     // 1. 初始化
     document.addEventListener("DOMContentLoaded", function() {{
+      const urlParams = new URLSearchParams(window.location.search);
+      const initialPrj = urlParams.get("project_id") || localStorage.getItem("workbench_active_project_id");
       initVisNetwork();
-      loadDatabaseState();
+      loadDatabaseState(initialPrj);
       loadErrors();
       setInterval(loadErrors, 10000);
       
@@ -2225,13 +2396,7 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
     function openNodeInWorkbench() {{
       const nodeObj = RAW_NODES.find(n => n.id === currentNodeId);
       if (nodeObj) {{
-        // 更新工作台標題與指示
-        document.getElementById("active-station-label").textContent = `🎯 當前工位：${{nodeObj.label}} [${{nodeObj.layer}}]`;
-        document.getElementById("ladder-node-title").textContent = nodeObj.label.split(" ")[1] || nodeObj.label;
-        document.getElementById("task-title-heading").textContent = nodeObj.label;
-        document.getElementById("task-phase-badge").textContent = nodeObj.layer;
-        document.getElementById("task-desc-text").textContent = nodeObj.summary + " " + (nodeObj.details || "");
-        
+        switchActiveStation(nodeObj);
         appendTerminalLine(`[STATION-SWITCH] Switched active station to: ${{nodeObj.id}} (${{nodeObj.label}})`, "term-warn");
       }}
       closeFlyout();
@@ -2428,6 +2593,9 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
           const repo = document.getElementById("input-gh-repo").value.trim();
           const actionRadio = document.querySelector('input[name="gh-action"]:checked');
           const action = actionRadio ? actionRadio.value : "clone";
+          const accRadio = document.querySelector('input[name="gh-account"]:checked');
+          const account = accRadio ? accRadio.value : "Josh404DR";
+          const token = document.getElementById("input-gh-token") ? document.getElementById("input-gh-token").value.trim() : "";
           const folder = document.getElementById("input-gh-folder").value.trim();
           const name = document.getElementById("input-gh-name").value.trim();
           const branch = document.getElementById("input-gh-branch").value.trim();
@@ -2436,13 +2604,15 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
             alert("請輸入 GitHub 倉庫網址或 owner/repo");
             return;
           }}
-          appendTerminalLine(`[IMPORT-GITHUB] Pulling from GitHub: "${{repo}}" (${{action}})...`, "term-info");
+          appendTerminalLine(`[IMPORT-GITHUB] Pulling from GitHub: "${{repo}}" (${{action}}, 帳號: ${{account}})...`, "term-info");
           const resp = await fetch("/api/project/import-github", {{
             method: "POST",
             headers: {{ "Content-Type": "application/json" }},
             body: JSON.stringify({{
               repo: repo,
               action: action,
+              account: account,
+              token: token,
               target_folder: folder,
               project_name: name,
               branch: branch,
@@ -2627,14 +2797,92 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
         cachedAllProjects = data.all_projects || [];
         const cachedArchivedProjects = data.archived_projects || [];
         cachedTickets = data.tickets || [];
-        if (!currentProjectId) {{
-          currentProjectId = (data.project && data.project.id) || "all";
+        
+        const prevProjectId = currentProjectId;
+        currentProjectId = (data.project && data.project.id) || targetProjectId || "all";
+
+        // 本地儲存與網址同步 (Persistence & URL Query)
+        if (currentProjectId && currentProjectId !== "all") {{
+          localStorage.setItem("workbench_active_project_id", currentProjectId);
+          const curUrl = new URL(window.location.href);
+          if (curUrl.searchParams.get("project_id") !== currentProjectId) {{
+            curUrl.searchParams.set("project_id", currentProjectId);
+            window.history.replaceState({{ project_id: currentProjectId }}, "", curUrl.toString());
+          }}
         }}
 
-        // 渲染專案切換標題
+        // 渲染專案切換標題與階梯麵包屑
         const prjTitle = document.getElementById("ladder-project-title");
         if (prjTitle) {{
           prjTitle.textContent = (data.project && data.project.name) || "專案";
+        }}
+        const goalTitle = document.getElementById("ladder-goal-title");
+        if (goalTitle) {{
+          goalTitle.textContent = (data.goals && data.goals.length > 0) ? data.goals[0].title : "核心架構重構";
+        }}
+        const taskTitle = document.getElementById("ladder-task-title");
+        if (taskTitle) {{
+          taskTitle.textContent = (data.tickets && data.tickets.length > 0) ? data.tickets[0].title : "Phase 1 契約門禁";
+        }}
+        const tktTitle = document.getElementById("ladder-ticket-title");
+        if (tktTitle) {{
+          tktTitle.textContent = (data.tickets && data.tickets.length > 0) ? (`#TKT-${{data.tickets[0].id}} [${{data.tickets[0].title}}]`) : "#TKT-104 [沙盒極限試車]";
+        }}
+        const tktPill = document.getElementById("task-status-pill");
+        if (tktPill) {{
+          tktPill.textContent = (data.tickets && data.tickets.length > 0) ? (`● ${{data.tickets[0].status.toUpperCase()}}`) : "● 待裝配 (READY)";
+        }}
+
+        // 動態重組可視化圖譜節點 (Vis-Network) 與工位更新
+        if (data.nodes && data.nodes.length > 0) {{
+          const graph = formatDbNodesToVis(data.nodes);
+          RAW_NODES = graph.nodes.map(fn => fn.rawData);
+          RAW_EDGES = graph.edges;
+          if (visNodes && visEdges && network) {{
+            visNodes.clear();
+            visNodes.add(graph.nodes);
+            visEdges.clear();
+            visEdges.add(graph.edges);
+            network.fit();
+          }}
+          const activeNode = RAW_NODES.find(n => n.id.includes("n4") || n.label.includes("N4") || n.level === 3) || RAW_NODES[0];
+          if (activeNode) {{
+            switchActiveStation(activeNode);
+          }}
+        }} else if (!data.nodes || data.nodes.length === 0) {{
+          RAW_NODES = [];
+          RAW_EDGES = [];
+          if (visNodes && visEdges && network) {{
+            visNodes.clear();
+            visEdges.clear();
+          }}
+          switchActiveStation({{
+            id: "empty",
+            label: (data.project && data.project.name) ? `${{data.project.name}} (空白沙盒)` : "尚未初始化架構節點",
+            layer: "空白專案",
+            summary: "此專案目前無心智圖節點架構。",
+            details: "您可在右上方點擊「➕ 建立 / 導入新專案」導入現有資料夾，或於左側對話框下達「在此開立工單」立案。"
+          }});
+        }}
+
+        // 專案切換對話提示
+        if (prevProjectId && prevProjectId !== currentProjectId && data.project) {{
+          const stream = document.getElementById("chat-stream");
+          if (stream) {{
+            const switchHtml = `
+              <div style="margin: 10px 0; padding: 10px 14px; background: rgba(56, 139, 253, 0.1); border: 1px solid rgba(56, 139, 253, 0.3); border-radius: 8px; font-size: 12px; color: var(--text-bright);">
+                <div style="font-weight: 700; display: flex; align-items: center; gap: 6px;">
+                  <span>🏢 工作台已切換至專案：${{escapeHtml(data.project.name)}}</span>
+                  <span class="badge" style="background:#1f6feb; color:#fff; font-size:10px; padding:1px 5px; border-radius:3px;">${{escapeHtml(data.project.id)}}</span>
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; font-family: monospace;">
+                  工作區目錄：${{escapeHtml(data.workspace ? (data.workspace.root_path || '') : '沙盒隔離目錄')}} &middot; 節點數：${{data.nodes ? data.nodes.length : 0}} 個 &middot; 工單數：${{data.tickets ? data.tickets.length : 0}} 張
+                </div>
+              </div>
+            `;
+            stream.insertAdjacentHTML("beforeend", switchHtml);
+            stream.scrollTop = stream.scrollHeight;
+          }}
         }}
 
         // 渲染活躍專案下拉選單清單

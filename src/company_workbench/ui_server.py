@@ -195,9 +195,9 @@ class PrototypeHandler(BaseHTTPRequestHandler):
             else:
                 if req_prj_id:
                     matched = next((p for p in all_available if p["id"] == req_prj_id), None)
-                    prj = matched or (all_projects[0] if all_projects else (archived_projects[0] if archived_projects else None))
+                    prj = matched or (all_projects[-1] if all_projects else (archived_projects[0] if archived_projects else None))
                 else:
-                    prj = all_projects[0] if all_projects else (archived_projects[0] if archived_projects else None)
+                    prj = all_projects[-1] if all_projects else (archived_projects[0] if archived_projects else None)
                 
                 if prj:
                     project_id = prj["id"]
@@ -306,10 +306,12 @@ class PrototypeHandler(BaseHTTPRequestHandler):
             return
 
         if (parsed.path in ("/", "/cockpit", "/agentos-map", "/map")) and ("view=classic" not in parsed.query):
+            params = parse_qs(parsed.query)
+            prj_param = params.get("project_id", [None])[0]
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(render_agentos_mindmap_html().encode("utf-8"))
+            self.wfile.write(render_agentos_mindmap_html(project_id=prj_param).encode("utf-8"))
             return
 
         params = parse_qs(parsed.query)
@@ -895,6 +897,8 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 body = {k: v[0] for k, v in parsed_dict.items()}
 
             repo_input = str(body.get("repo", "")).strip()
+            account = str(body.get("account", "Josh404DR")).strip()
+            token = str(body.get("token", "")).strip()
             action = str(body.get("action", "clone")).strip()
             target_folder = str(body.get("target_folder", "")).strip()
             project_name = str(body.get("project_name", "")).strip()
@@ -913,6 +917,9 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 else:
                     repo_url = f"https://github.com/{repo_input.strip('/')}.git"
                     default_name = repo_input.strip("/").split("/")[-1]
+
+                if token and repo_url.startswith("https://"):
+                    repo_url = repo_url.replace("https://", f"https://{token}@")
 
                 folder_name = target_folder or default_name
                 proj_name = project_name or folder_name
@@ -959,12 +966,25 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                         except Exception:
                             pass
 
+                    if account == "sayaJosh":
+                        git_user_name = "sayaJosh"
+                        git_user_email = "sayaJosh@users.noreply.github.com"
+                    else:
+                        git_user_name = "Josh404DR"
+                        git_user_email = "pkg0530hsu@gmail.com"
+
+                    try:
+                        subprocess.run(["git", "-C", str(dest_dir), "config", "user.name", git_user_name], capture_output=True, timeout=5)
+                        subprocess.run(["git", "-C", str(dest_dir), "config", "user.email", git_user_email], capture_output=True, timeout=5)
+                    except Exception:
+                        pass
+
                     res = {
                         "status": "ok",
                         "project": prj,
                         "workspace": ws,
                         "project_id": prj["id"],
-                        "message": f"成功建立專案「{prj['name']}」{fork_msg}！({clone_msg})",
+                        "message": f"成功建立專案「{prj['name']}」{fork_msg}！({clone_msg}，已綁定 GitHub 身份: {git_user_name})",
                     }
                 except Exception as exc:
                     res = {"status": "error", "message": f"GitHub 導入失敗: {str(exc)}"}
