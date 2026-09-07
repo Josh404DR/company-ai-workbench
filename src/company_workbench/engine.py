@@ -1614,12 +1614,25 @@ class WorkbenchEngine:
         project_id: str,
         *,
         goal_id: str | None = None,
+        root_path: str | None = None,
+        force_refresh: bool = False,
     ) -> list[dict[str, Any]]:
-        """Populate database nodes from grounded AgentOS-Lite mind map definitions."""
-        from .mindmap import get_agentos_graph_data
+        """Populate database nodes from grounded project mind map definitions."""
+        from .mindmap import generate_project_graph_data
 
-        nodes_data, _ = get_agentos_graph_data()
+        prj = self.get_project(project_id)
+        if not root_path:
+            try:
+                ws = self.get_workspace(prj["workspace_id"])
+                root_path = ws.get("root_path")
+            except Exception:
+                pass
+
+        nodes_data, _ = generate_project_graph_data(prj["name"], root_path=root_path)
         with self.store.transaction() as db:
+            if force_refresh:
+                db.execute("DELETE FROM nodes WHERE project_id=?", (project_id,))
+
             for n in nodes_data:
                 existing = db.execute(
                     "SELECT id FROM nodes WHERE project_id=? AND title=?", (project_id, n["label"])
@@ -1636,6 +1649,9 @@ class WorkbenchEngine:
                     "milestone": "milestone",
                     "task": "task",
                     "delivery": "task",
+                    "workbench": "task",
+                    "path": "task",
+                    "focus": "task",
                 }
                 schema_layer = layer_map.get(n.get("group", "task"), "task")
                 db.execute(

@@ -201,19 +201,26 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 
                 if prj:
                     project_id = prj["id"]
+                    target_ws = next((w for w in workspaces if w["id"] == prj.get("workspace_id")), workspaces[0] if workspaces else None)
                     goals = engine.list_goals(project_id)
                     tickets = engine.list_tickets(project_id)
                     for t in tickets:
                         t["project_name"] = prj_map.get(t["project_id"], prj["name"])
                     nodes = engine.list_nodes(project_id)
+                    if not nodes and target_ws and target_ws.get("root_path"):
+                        try:
+                            nodes = engine.sync_agentos_mindmap_nodes(project_id, root_path=target_ws.get("root_path"))
+                        except Exception:
+                            pass
                 else:
                     project_id = ""
+                    target_ws = workspaces[0] if workspaces else None
                     goals = []
                     tickets = []
                     nodes = []
                 
                 data = {
-                    "workspace": workspaces[0] if workspaces else None,
+                    "workspace": target_ws,
                     "project": prj,
                     "current_project_id": project_id,
                     "all_projects": all_projects,
@@ -872,7 +879,7 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                     prj = engine.create_project(ws["id"], proj_name)
                     if sync_nodes:
                         try:
-                            engine.sync_agentos_mindmap_nodes(prj["id"])
+                            engine.sync_agentos_mindmap_nodes(prj["id"], root_path=canonical_path, force_refresh=True)
                         except Exception:
                             pass
                     res = {
@@ -962,7 +969,7 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                     prj = engine.create_project(ws["id"], proj_name)
                     if sync_nodes:
                         try:
-                            engine.sync_agentos_mindmap_nodes(prj["id"])
+                            engine.sync_agentos_mindmap_nodes(prj["id"], root_path=canonical_path, force_refresh=True)
                         except Exception:
                             pass
 

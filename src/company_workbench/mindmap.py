@@ -7,6 +7,7 @@ Addresses scattered connection graph with structured stage levels, focus filters
 import html
 import json
 from pathlib import Path
+import subprocess
 
 def get_agentos_graph_data():
     r"""Extract grounded node graph from E:\Workspace\agentos-lite with explicit Workflow levels."""
@@ -221,6 +222,328 @@ def get_agentos_graph_data():
         {"from": "arch_verifier", "to": "human_acceptance", "label": "驗證通過(PASS)"},
         {"from": "human_acceptance", "to": "deliver_master", "label": "Josh 核准合入", "color": {"color": "#238636"}, "width": 3}
     ]
+
+    return nodes, edges
+
+
+def generate_project_graph_data(project_name: str, root_path: str | Path | None = None) -> tuple[list[dict], list[dict]]:
+    """Generate dynamic mind map nodes & edges for any project based on its real directory & git structure."""
+    if not root_path:
+        return get_agentos_graph_data()
+
+    p = Path(str(root_path).replace("\\", "/"))
+    # Handle Docker vs Windows paths
+    if not p.exists():
+        if str(p).lower().startswith("e:/workspace/"):
+            alt = Path("/workspace") / str(p)[len("e:/workspace/"):]
+            if alt.exists():
+                p = alt
+        elif str(p).startswith("/workspace/"):
+            alt = Path("E:/Workspace") / str(p)[len("/workspace/"):]
+            if alt.exists():
+                p = alt
+
+    if not p.exists() or not p.is_dir():
+        return get_agentos_graph_data()
+
+    if p.name.lower() in ("agentos-lite", "agentos") or (p / "tools" / "contract_linter").exists():
+        return get_agentos_graph_data()
+
+    nodes = []
+    edges = []
+
+    # 1. Level 1: 專案治理與契約憲章 (Governance & Memory)
+    agents_md = p / "AGENTS.md"
+    readme_md = p / "README.md"
+    
+    mem_nodes = []
+    if agents_md.exists():
+        mem_nodes.append({
+            "id": "mem_governance",
+            "label": f"🏛️ {project_name} 核心契約 (AGENTS.md)",
+            "group": "memory",
+            "layer": "階段一：治理契約",
+            "level": 1,
+            "summary": "界定 Builder/Verifier 責任邊界、工單狀態流轉與安全不變量 (Invariants)。",
+            "files": ["AGENTS.md"],
+            "details": "本專案不可違背之最高憲章，所有工單遵循此標準交付。",
+            "color": "#8957e5"
+        })
+    else:
+        mem_nodes.append({
+            "id": "mem_governance",
+            "label": f"🏛️ {project_name} 專案架構契約",
+            "group": "memory",
+            "layer": "階段一：治理契約",
+            "level": 1,
+            "summary": "以合約驅動開發 (Contract-Driven)，規範模組邊界與職責邊界。",
+            "files": ["README.md" if readme_md.exists() else "."],
+            "details": "由專案裝配台統一納管之架構標準。",
+            "color": "#8957e5"
+        })
+
+    # Specs / State
+    doc_files = [f.name for f in p.glob("*.md") if f.name not in ("AGENTS.md",)]
+    if doc_files:
+        mem_nodes.append({
+            "id": "mem_specs",
+            "label": f"🧠 專案狀態與設計規格 ({doc_files[0]})",
+            "group": "memory",
+            "layer": "階段一：治理契約",
+            "level": 1,
+            "summary": f"收錄 {', '.join(doc_files[:3])} 等專案背景與需求現況。",
+            "files": doc_files[:5],
+            "details": "現況狀態與技術設計正本。",
+            "color": "#8957e5"
+        })
+    else:
+        mem_nodes.append({
+            "id": "mem_specs",
+            "label": f"🧠 專案狀態與技術規格 (PROJECT_STATE.md)",
+            "group": "memory",
+            "layer": "階段一：治理契約",
+            "level": 1,
+            "summary": "維護專案迭代狀態、決策記錄與規格定義。",
+            "files": ["PROJECT_STATE.md"],
+            "details": "規格與現況狀態追溯。",
+            "color": "#8957e5"
+        })
+    
+    docs_dir = p / "docs"
+    if docs_dir.exists() and docs_dir.is_dir():
+        mem_nodes.append({
+            "id": "mem_docs",
+            "label": "📖 系統設計與架構手冊 (docs/)",
+            "group": "memory",
+            "layer": "階段一：治理契約",
+            "level": 1,
+            "summary": "儲存主題規格文件、流程圖與技術決策記錄。",
+            "files": ["docs/"],
+            "details": "提供長效期架構參考與決策追溯。",
+            "color": "#8957e5"
+        })
+    else:
+        mem_nodes.append({
+            "id": "mem_docs",
+            "label": "📖 系統架構手冊與文件庫 (docs/)",
+            "group": "memory",
+            "layer": "階段一：治理契約",
+            "level": 1,
+            "summary": "收錄架構圖、API 規格與團隊共識指引。",
+            "files": ["docs/"],
+            "details": "提供系統設計與架構導覽。",
+            "color": "#8957e5"
+        })
+
+    nodes.extend(mem_nodes)
+
+    # 2. Level 2: 核心功能架構與模組 (Architecture & Modules)
+    excluded_dirs = {
+        ".git", ".claude", ".agents", ".venv", "venv", "node_modules",
+        "__pycache__", "output", "tmp", "logs", "test-results", "scratch",
+        "scratch_test", "dist", "build", ".idea", ".vscode", "temp-worktrees"
+    }
+    subdirs = [d for d in sorted(p.iterdir()) if d.is_dir() and d.name not in excluded_dirs and not d.name.startswith(".") and not d.name.startswith("_")]
+    
+    arch_nodes = []
+    module_labels_map = {
+        "modules": "⚙️ modules (核心邏輯模組)",
+        "backend_server": "⚡ backend_server (後端服務器)",
+        "governance-portal": "🌐 governance-portal (治理中控前端)",
+        "coordination": "🤝 coordination (協調調度系統)",
+        "prompts": "📝 prompts (AI 提示詞庫)",
+        "schemas": "📐 schemas (資料模型與協議)",
+        "config": "🔧 config (系統環境配置)",
+        "src": "🏛️ src (系統核心源碼庫)",
+        "tools": "🛠️ tools (工程輔助工具鏈)",
+        "scripts": "📜 scripts (自動化維運腳本)",
+        "storage": "💾 storage (持久化儲存層)",
+        "prototype": "🎨 prototype (互動原型設計)",
+        "webui": "💻 webui (使用者介面)",
+        "archive": "📦 archive (歷史歸檔庫)",
+        "utils": "🧰 utils (共用工具函數庫)"
+    }
+
+    for d in subdirs[:6]:
+        slug = d.name.lower().replace("-", "_").replace(" ", "_")
+        lbl = module_labels_map.get(d.name, f"📦 {d.name} (核心模組)")
+        arch_nodes.append({
+            "id": f"arch_{slug}",
+            "label": lbl,
+            "group": "architecture",
+            "layer": "階段二：核心架構",
+            "level": 2,
+            "summary": f"負責專案 {d.name} 子系統功能實作與服務封裝。",
+            "files": [d.name],
+            "details": f"子模組目錄：{d.name}",
+            "color": "#1f6feb"
+        })
+
+    if len(arch_nodes) < 3:
+        baseline_arch = [
+            ("arch_main", f"🏛️ {project_name} 核心應用層", "主要業務程式碼與應用邏輯入口。"),
+            ("arch_logic", f"⚙️ {project_name} 領域邏輯模組", "負責核心計算流程與資料處理管線。"),
+            ("arch_schemas", f"📐 資料模型與協議協議 (Schemas)", "定義前後端通信格式與資料約束。"),
+        ]
+        for aid, albl, asumm in baseline_arch:
+            if not any(n["id"] == aid for n in arch_nodes) and len(arch_nodes) < 3:
+                arch_nodes.append({
+                    "id": aid,
+                    "label": albl,
+                    "group": "architecture",
+                    "layer": "階段二：核心架構",
+                    "level": 2,
+                    "summary": asumm,
+                    "files": ["."],
+                    "details": "模組核心封裝。",
+                    "color": "#1f6feb"
+                })
+
+    nodes.extend(arch_nodes)
+
+    # 3. Level 3: 任務流與排程 (Tasks & Pipelines)
+    task_nodes = []
+    tasks_md = p / "TASKS.md"
+    handoff_md = p / "HANDOFF.md"
+    if tasks_md.exists() or handoff_md.exists():
+        task_nodes.append({
+            "id": "task_pipeline",
+            "label": "📋 任務清單與移交進度 (TASKS.md)",
+            "group": "logic",
+            "layer": "階段三：任務流水線",
+            "level": 3,
+            "summary": "紀錄當前迭代待辦工單、已完成里程碑與未決問題。",
+            "files": [f.name for f in (tasks_md, handoff_md) if f.exists()],
+            "details": "敏捷任務看板正本。",
+            "color": "#238636"
+        })
+    else:
+        task_nodes.append({
+            "id": "task_pipeline",
+            "label": "📋 迭代任務看板與排程 (Tasks)",
+            "group": "logic",
+            "layer": "階段三：任務流水線",
+            "level": 3,
+            "summary": "追蹤當前階段目標、工作包指派與進度卡點。",
+            "files": ["TASKS.md"],
+            "details": "任務推進看板。",
+            "color": "#238636"
+        })
+
+    branch_name = None
+    if (p / ".git").exists():
+        try:
+            r = subprocess.run(["git", "-C", str(p), "branch", "--show-current"], capture_output=True, text=True, timeout=2)
+            branch_name = r.stdout.strip()
+        except Exception:
+            pass
+    if branch_name:
+        task_nodes.append({
+            "id": "task_branch",
+            "label": f"🌿 當前工作分支: {branch_name}",
+            "group": "path",
+            "layer": "階段三：任務流水線",
+            "level": 3,
+            "summary": f"隔離開發分支 {branch_name}，追蹤最近提交與變更範圍。",
+            "files": [".git"],
+            "details": f"Git 分支維度：{branch_name}",
+            "color": "#3fb950"
+        })
+    else:
+        task_nodes.append({
+            "id": "task_branch",
+            "label": "🌿 敏捷工作分支 (Git Workspace)",
+            "group": "path",
+            "layer": "階段三：任務流水線",
+            "level": 3,
+            "summary": "工作樹隔離環境，追蹤工單提交與變更範圍。",
+            "files": [".git"],
+            "details": "分支環境。",
+            "color": "#3fb950"
+        })
+
+    task_nodes.append({
+        "id": "task_active_station",
+        "label": f"🔥 {project_name} 當前焦點工位 (Active)",
+        "group": "focus",
+        "layer": "階段三：任務流水線",
+        "level": 3,
+        "summary": "【當前工作台裝配中】：任務維度至原子工單維度對話與推進焦點。",
+        "files": ["."],
+        "details": "在此對話、執行測試或建立原子工單。",
+        "color": "#f0883e"
+    })
+    nodes.extend(task_nodes)
+
+    # 4. Level 4: 執行沙盒與檢驗門禁 (Sandbox & Verification)
+    verif_nodes = []
+    verif_nodes.append({
+        "id": "sandbox_tests",
+        "label": "🧪 自動化測試與覆蓋率驗證套件",
+        "group": "workbench",
+        "layer": "階段四：沙盒與驗證",
+        "level": 4,
+        "summary": "執行單元測試、整合測試與端對端回歸測試。",
+        "files": ["tests/" if (p / "tests").exists() else "."],
+        "details": "要求零迴歸 (Zero Regression) 才能提交驗收。",
+        "color": "#3fb950"
+    })
+    verif_nodes.append({
+        "id": "sandbox_docker",
+        "label": "🐳 Docker 容器沙盒環境",
+        "group": "workbench",
+        "layer": "階段四：沙盒與驗證",
+        "level": 4,
+        "summary": "以容器與 Worktree 隔離運行，確保生產環境同構與依賴封裝。",
+        "files": ["Dockerfile" if (p / "Dockerfile").exists() else "docker-compose.yml"],
+        "details": "沙盒環境隔離試車。",
+        "color": "#388bfd"
+    })
+    nodes.extend(verif_nodes)
+
+    # 5. Level 5: 主幹交付 (Delivery)
+    delivery_nodes = [
+        {
+            "id": "human_acceptance",
+            "label": "🛡️ Josh 人工驗收專屬門禁",
+            "group": "delivery",
+            "layer": "階段五：主幹交付",
+            "level": 5,
+            "summary": "檢驗 SHA-256 憑證、測試報表與成果驗收，確認無公差後放行合入。",
+            "files": ["AGENTS.md"],
+            "details": "Fail-Closed 煞車機制，最終人工放行門禁。",
+            "color": "#da3633"
+        },
+        {
+            "id": "deliver_main",
+            "label": "🚢 Deliver to Mainline (主分支安全交付)",
+            "group": "delivery",
+            "layer": "階段五：主幹交付",
+            "level": 5,
+            "summary": f"安全合入主分支並推送至遠端倉庫，完成 {project_name} 本次迭代發布。",
+            "files": ["."],
+            "details": "已驗收合格工單歸檔上線。",
+            "color": "#238636"
+        }
+    ]
+    nodes.extend(delivery_nodes)
+
+    # 建立階層連線
+    for m in mem_nodes:
+        for a in arch_nodes[:2]:
+            edges.append({"from": m["id"], "to": a["id"], "label": "架構約束"})
+
+    for a in arch_nodes[:2]:
+        for t in task_nodes:
+            edges.append({"from": a["id"], "to": t["id"], "label": "派工執行"})
+
+    for t in task_nodes:
+        for v in verif_nodes:
+            edges.append({"from": t["id"], "to": v["id"], "label": "進入沙盒驗證", "color": {"color": "#f0883e"}, "width": 2})
+
+    for v in verif_nodes:
+        edges.append({"from": v["id"], "to": "human_acceptance", "label": "驗證通過 (PASS)"})
+    edges.append({"from": "human_acceptance", "to": "deliver_main", "label": "Josh 核准合入", "color": {"color": "#238636"}, "width": 3})
 
     return nodes, edges
 
@@ -2444,7 +2767,7 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
       }}
     }});
 
-    function selectProject(prjId) {{
+    function selectProject(prjId, autoSwitchView = true) {{
       currentProjectId = prjId;
       const menu = document.getElementById("project-dropdown-menu");
       if (menu) menu.classList.remove("show");
@@ -2461,6 +2784,9 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
 
       appendTerminalLine(`[PROJECT-SWITCH] Switched active project context to: ${{prjId}}`, "term-warn");
       loadDatabaseState(prjId);
+      if (autoSwitchView && activeViewMode === "workbench") {{
+        switchViewMode("split");
+      }}
     }}
 
     let currentNewProjectTab = "local";
