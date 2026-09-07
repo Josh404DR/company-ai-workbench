@@ -287,6 +287,42 @@ class ProjectSwitcherTestCase(unittest.TestCase):
         self.assertEqual(1, len(state_filtered.get("tickets", [])))
         self.assertEqual("Ticket in Project 2", state_filtered["tickets"][0]["title"])
 
+        # 6. Test POST /api/project/archive
+        status, data = self.request_json("/api/project/archive", {
+            "project_id": new_prj_id,
+        })
+        self.assertEqual(200, status)
+        self.assertEqual("ok", data.get("status"))
+
+        # Verify state: new_prj_id is in archived_projects and not in all_projects
+        status, body, _ = self.request("GET", "/api/state")
+        self.assertEqual(200, status)
+        state_after_archive = json.loads(body)
+        active_ids = [p["id"] for p in state_after_archive.get("all_projects", [])]
+        archived_ids = [p["id"] for p in state_after_archive.get("archived_projects", [])]
+        self.assertNotIn(new_prj_id, active_ids)
+        self.assertIn(new_prj_id, archived_ids)
+
+        # 7. Test POST /api/project/unarchive
+        status, data = self.request_json("/api/project/unarchive", {
+            "project_id": new_prj_id,
+        })
+        self.assertEqual(200, status)
+        self.assertEqual("ok", data.get("status"))
+
+        # Verify state: restored to all_projects
+        status, body, _ = self.request("GET", "/api/state")
+        self.assertEqual(200, status)
+        state_after_unarchive = json.loads(body)
+        active_ids_restored = [p["id"] for p in state_after_unarchive.get("all_projects", [])]
+        self.assertIn(new_prj_id, active_ids_restored)
+
+        # 8. Verify HTML markup includes archived section and item action buttons
+        status, body, _ = self.request("GET", "/")
+        self.assertEqual(200, status)
+        self.assertIn("archived-projects-wrapper", body)
+        self.assertIn("btn-item-action", body)
+
 
 if __name__ == "__main__":
     unittest.main()

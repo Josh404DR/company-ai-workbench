@@ -150,15 +150,22 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 ws = engine.create_workspace("Default Workspace")
                 prj = engine.create_project(ws["id"], "AgentOS-Lite")
                 all_projects = [prj]
+                archived_projects = []
             else:
                 all_projects = []
+                archived_projects = []
                 for w in workspaces:
-                    all_projects.extend(engine.list_projects(w["id"]))
-                if not all_projects:
+                    all_projects.extend(engine.list_projects(w["id"], include_archived=False))
+                    all_with_arch = engine.list_projects(w["id"], include_archived=True)
+                    archived_projects.extend([p for p in all_with_arch if p.get("is_archived")])
+                if not all_projects and not archived_projects:
                     prj = engine.create_project(workspaces[0]["id"], "AgentOS-Lite")
                     all_projects = [prj]
+                elif not all_projects and archived_projects:
+                    all_projects = [archived_projects[0]]
 
-            prj_map = {p["id"]: p["name"] for p in all_projects}
+            all_available = all_projects + archived_projects
+            prj_map = {p["id"]: p["name"] for p in all_available}
             query_params = parse_qs(parsed.query)
             req_prj_id = query_params.get("project_id", [None])[0]
 
@@ -178,6 +185,7 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                     "project": {"id": "all", "name": "全部專案 (跨專案總表)"},
                     "current_project_id": "all",
                     "all_projects": all_projects,
+                    "archived_projects": archived_projects,
                     "goals": all_goals,
                     "tickets": all_tickets,
                     "nodes": all_nodes,
@@ -185,22 +193,30 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                 }
             else:
                 if req_prj_id:
-                    matched = next((p for p in all_projects if p["id"] == req_prj_id), None)
-                    prj = matched or all_projects[0]
+                    matched = next((p for p in all_available if p["id"] == req_prj_id), None)
+                    prj = matched or (all_projects[0] if all_projects else (archived_projects[0] if archived_projects else None))
                 else:
-                    prj = all_projects[0]
-                project_id = prj["id"]
-                goals = engine.list_goals(project_id)
-                tickets = engine.list_tickets(project_id)
-                for t in tickets:
-                    t["project_name"] = prj_map.get(t["project_id"], prj["name"])
-                nodes = engine.list_nodes(project_id)
+                    prj = all_projects[0] if all_projects else (archived_projects[0] if archived_projects else None)
+                
+                if prj:
+                    project_id = prj["id"]
+                    goals = engine.list_goals(project_id)
+                    tickets = engine.list_tickets(project_id)
+                    for t in tickets:
+                        t["project_name"] = prj_map.get(t["project_id"], prj["name"])
+                    nodes = engine.list_nodes(project_id)
+                else:
+                    project_id = ""
+                    goals = []
+                    tickets = []
+                    nodes = []
                 
                 data = {
                     "workspace": workspaces[0] if workspaces else None,
                     "project": prj,
                     "current_project_id": project_id,
                     "all_projects": all_projects,
+                    "archived_projects": archived_projects,
                     "goals": goals,
                     "tickets": tickets,
                     "nodes": nodes,
@@ -699,6 +715,50 @@ class PrototypeHandler(BaseHTTPRequestHandler):
                     "project_id": prj["id"],
                     "projects": engine.list_projects(ws_id),
                 }
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/project/archive":
+            try:
+                body = json.loads(post_body)
+            except Exception:
+                parsed_dict = parse_qs(post_body)
+                body = {k: v[0] for k, v in parsed_dict.items()}
+            prj_id = str(body.get("project_id", "")).strip()
+            if not prj_id:
+                res = {"status": "error", "message": "專案 ID 不可為空"}
+            else:
+                engine = get_engine()
+                try:
+                    updated = engine.archive_project(prj_id)
+                    res = {"status": "ok", "project": updated}
+                except Exception as exc:
+                    res = {"status": "error", "message": str(exc)}
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/project/unarchive":
+            try:
+                body = json.loads(post_body)
+            except Exception:
+                parsed_dict = parse_qs(post_body)
+                body = {k: v[0] for k, v in parsed_dict.items()}
+            prj_id = str(body.get("project_id", "")).strip()
+            if not prj_id:
+                res = {"status": "error", "message": "專案 ID 不可為空"}
+            else:
+                engine = get_engine()
+                try:
+                    updated = engine.unarchive_project(prj_id)
+                    res = {"status": "ok", "project": updated}
+                except Exception as exc:
+                    res = {"status": "error", "message": str(exc)}
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()

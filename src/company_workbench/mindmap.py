@@ -441,6 +441,22 @@ def render_agentos_mindmap_html():
       background: rgba(63, 185, 80, 0.15);
       color: #fff;
     }}
+    .btn-item-action {{
+      opacity: 0.35;
+      font-size: 11px;
+      padding: 1px 4px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }}
+    .dropdown-item:hover .btn-item-action {{
+      opacity: 0.85;
+    }}
+    .btn-item-action:hover {{
+      opacity: 1 !important;
+      background: rgba(255, 255, 255, 0.15);
+      transform: scale(1.15);
+    }}
 
     /* 模式切換標籤頁 (View Mode Switcher) */
     .view-mode-tabs {{
@@ -1296,6 +1312,13 @@ def render_agentos_mindmap_html():
             </div>
             <div class="dropdown-divider"></div>
             <div id="project-list-items"></div>
+            <div id="archived-projects-wrapper" style="display:none; border-top:1px dashed var(--border); margin-top:4px; padding-top:4px;">
+              <div class="dropdown-header" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center; user-select:none;" onclick="toggleArchivedSection(event)">
+                <span>📦 已歸檔專案 (<span id="archived-count-badge">0</span>)</span>
+                <span id="archived-toggle-icon" style="font-size:9px;">▾</span>
+              </div>
+              <div id="archived-project-list" style="display:none; max-height:160px; overflow-y:auto; padding:2px 0;"></div>
+            </div>
             <div class="dropdown-divider"></div>
             <div class="dropdown-action" onclick="promptCreateProject()">
               <span>➕ 建立新專案...</span>
@@ -1995,6 +2018,61 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
       }}
     }}
 
+    async function archiveProject(prjId, prjName) {{
+      if (!confirm(`確定要歸檔專案「${{prjName}}」嗎？\n歸檔後會移至「已歸檔專案」清單，隨時可一鍵還原。`)) return;
+      appendTerminalLine(`[PROJECT-ARCHIVE] Archiving project: "${{prjName}}"...`, "term-info");
+      try {{
+        const resp = await fetch("/api/project/archive", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ project_id: prjId }})
+        }});
+        const data = await resp.json();
+        if (data.status === "ok") {{
+          appendTerminalLine(`[PROJECT-ARCHIVED] Project "${{prjName}}" archived.`, "term-success");
+          if (currentProjectId === prjId) {{
+            currentProjectId = "all";
+          }}
+          loadDatabaseState(currentProjectId);
+        }} else {{
+          appendTerminalLine(`[PROJECT-ARCHIVE-ERROR] ${{data.message}}`, "term-warn");
+        }}
+      }} catch(err) {{
+        appendTerminalLine(`[PROJECT-ARCHIVE-ERROR] ${{err}}`, "term-dim");
+      }}
+    }}
+
+    async function unarchiveProject(prjId, prjName) {{
+      appendTerminalLine(`[PROJECT-UNARCHIVE] Restoring project: "${{prjName}}"...`, "term-info");
+      try {{
+        const resp = await fetch("/api/project/unarchive", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ project_id: prjId }})
+        }});
+        const data = await resp.json();
+        if (data.status === "ok") {{
+          appendTerminalLine(`[PROJECT-RESTORED] Project "${{prjName}}" restored to active.`, "term-success");
+          loadDatabaseState(prjId);
+        }} else {{
+          appendTerminalLine(`[PROJECT-UNARCHIVE-ERROR] ${{data.message}}`, "term-warn");
+        }}
+      }} catch(err) {{
+        appendTerminalLine(`[PROJECT-UNARCHIVE-ERROR] ${{err}}`, "term-dim");
+      }}
+    }}
+
+    function toggleArchivedSection(e) {{
+      if (e) e.stopPropagation();
+      const list = document.getElementById("archived-project-list");
+      const icon = document.getElementById("archived-toggle-icon");
+      if (list) {{
+        const isHidden = (list.style.display === "none" || !list.style.display);
+        list.style.display = isHidden ? "block" : "none";
+        if (icon) icon.textContent = isHidden ? "▴" : "▾";
+      }}
+    }}
+
     function switchTicketsScope(scope) {{
       ticketsScope = scope;
       const btnCur = document.getElementById("btn-scope-current");
@@ -2077,6 +2155,7 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
         const data = await resp.json();
         
         cachedAllProjects = data.all_projects || [];
+        const cachedArchivedProjects = data.archived_projects || [];
         cachedTickets = data.tickets || [];
         if (!currentProjectId) {{
           currentProjectId = (data.project && data.project.id) || "all";
@@ -2088,15 +2167,37 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
           prjTitle.textContent = (data.project && data.project.name) || "專案";
         }}
 
-        // 渲染專案下拉選單清單
+        // 渲染活躍專案下拉選單清單
         const pContainer = document.getElementById("project-list-items");
         if (pContainer) {{
           pContainer.innerHTML = cachedAllProjects.map(p => `
             <div class="dropdown-item ${{p.id === currentProjectId ? 'active' : ''}}" onclick="selectProject('${{p.id}}')">
-              <span>🏢 ${{escapeHtml(p.name)}}</span>
-              ${{p.id === currentProjectId ? '<span style="color:#388bfd; font-weight:800;">✓</span>' : ''}}
+              <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px;">🏢 ${{escapeHtml(p.name)}}</span>
+              <div style="display:flex; align-items:center; gap:6px;">
+                ${{p.id === currentProjectId ? '<span style="color:#388bfd; font-weight:800;">✓</span>' : ''}}
+                <span class="btn-item-action" title="封存/歸檔此專案" onclick="event.stopPropagation(); archiveProject('${{p.id}}', '${{escapeHtml(p.name)}}')">📦</span>
+              </div>
             </div>
           `).join("");
+        }}
+
+        // 渲染已歸檔專案清單
+        const archWrapper = document.getElementById("archived-projects-wrapper");
+        const archList = document.getElementById("archived-project-list");
+        const archBadge = document.getElementById("archived-count-badge");
+        if (archWrapper && archList) {{
+          if (cachedArchivedProjects.length > 0) {{
+            archWrapper.style.display = "block";
+            if (archBadge) archBadge.textContent = cachedArchivedProjects.length;
+            archList.innerHTML = cachedArchivedProjects.map(p => `
+              <div class="dropdown-item ${{p.id === currentProjectId ? 'active' : ''}}" style="opacity:0.8; font-size:11px;" onclick="selectProject('${{p.id}}')">
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:170px; color:var(--text-muted);">📁 ${{escapeHtml(p.name)}}</span>
+                <span class="btn-item-action" title="還原此專案至活躍狀態" onclick="event.stopPropagation(); unarchiveProject('${{p.id}}', '${{escapeHtml(p.name)}}')">↺</span>
+              </div>
+            `).join("");
+          }} else {{
+            archWrapper.style.display = "none";
+          }}
         }}
         const optAll = document.getElementById("opt-prj-all");
         if (optAll) {{

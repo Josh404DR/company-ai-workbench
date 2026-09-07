@@ -197,7 +197,9 @@ class WorkbenchEngine:
                 )
         except sqlite3.IntegrityError as error:
             raise NotFoundError(f"Workspace not found: {workspace_id}") from error
-        return item
+        result = dict(item)
+        result["is_archived"] = False
+        return result
 
     def create_ticket(
         self,
@@ -1221,17 +1223,71 @@ class WorkbenchEngine:
             rows = db.execute("SELECT * FROM workspaces ORDER BY created_at").fetchall()
         return [dict(r) for r in rows]
 
-    def list_projects(self, workspace_id: str) -> list[dict[str, Any]]:
+    def list_projects(self, workspace_id: str, *, include_archived: bool = False) -> list[dict[str, Any]]:
         with self.store.connect() as db:
-            rows = db.execute("SELECT * FROM projects WHERE workspace_id=? ORDER BY created_at", (workspace_id,)).fetchall()
-        return [dict(r) for r in rows]
+            try:
+                db.execute("CREATE TABLE IF NOT EXISTS project_archives (project_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL)")
+                if include_archived:
+                    rows = db.execute(
+                        """
+                        SELECT p.*, (CASE WHEN a.project_id IS NOT NULL THEN 1 ELSE 0 END) as is_archived
+                        FROM projects p
+                        LEFT JOIN project_archives a ON p.id = a.project_id
+                        WHERE p.workspace_id=?
+                        ORDER BY p.created_at
+                        """,
+                        (workspace_id,),
+                    ).fetchall()
+                else:
+                    rows = db.execute(
+                        """
+                        SELECT p.*, 0 as is_archived
+                        FROM projects p
+                        LEFT JOIN project_archives a ON p.id = a.project_id
+                        WHERE p.workspace_id=? AND a.project_id IS NULL
+                        ORDER BY p.created_at
+                        """,
+                        (workspace_id,),
+                    ).fetchall()
+            except sqlite3.OperationalError:
+                rows = db.execute("SELECT * FROM projects WHERE workspace_id=? ORDER BY created_at", (workspace_id,)).fetchall()
+        result = []
+        for r in rows:
+            item = dict(r)
+            item["is_archived"] = bool(item.get("is_archived", 0))
+            result.append(item)
+        return result
+
+    def archive_project(self, project_id: str) -> dict[str, Any]:
+        with self.store.transaction() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS project_archives (project_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL)")
+            row = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+            if not row:
+                raise NotFoundError(f"Project not found: {project_id}")
+            db.execute("INSERT OR REPLACE INTO project_archives (project_id, archived_at) VALUES (?, ?)", (project_id, _now()))
+        return self.get_project(project_id)
+
+    def unarchive_project(self, project_id: str) -> dict[str, Any]:
+        with self.store.transaction() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS project_archives (project_id TEXT PRIMARY KEY, archived_at TEXT NOT NULL)")
+            row = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+            if not row:
+                raise NotFoundError(f"Project not found: {project_id}")
+            db.execute("DELETE FROM project_archives WHERE project_id=?", (project_id,))
+        return self.get_project(project_id)
 
     def get_project(self, project_id: str) -> dict[str, Any]:
         with self.store.connect() as db:
             row = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
-        if not row:
-            raise NotFoundError(f"Project not found: {project_id}")
-        return dict(row)
+            if not row:
+                raise NotFoundError(f"Project not found: {project_id}")
+            item = dict(row)
+            try:
+                arch = db.execute("SELECT 1 FROM project_archives WHERE project_id=?", (project_id,)).fetchone()
+                item["is_archived"] = bool(arch)
+            except sqlite3.OperationalError:
+                item["is_archived"] = False
+        return item
 
     def list_tickets(self, project_id: str, *, goal_id: str | None = None) -> list[dict[str, Any]]:
         with self.store.connect() as db:

@@ -121,14 +121,20 @@ class SQLiteStore:
         try:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
         except sqlite3.OperationalError as exc:
-            if "duplicate column name" not in str(exc).lower():
-                raise
+            msg = str(exc).lower()
+            if "duplicate column name" in msg or "no such table" in msg:
+                return
+            raise
 
     @classmethod
     def _apply_v8(cls, connection: sqlite3.Connection) -> None:
-        """System error telemetry, background sentinel findings, and automated issue triage."""
+        """System error telemetry, background sentinel findings, automated triage, and project archives."""
         connection.executescript(
             """
+            CREATE TABLE IF NOT EXISTS project_archives (
+                project_id TEXT PRIMARY KEY,
+                archived_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS system_errors (
                 id TEXT PRIMARY KEY,
                 fingerprint TEXT NOT NULL,
@@ -353,6 +359,10 @@ class SQLiteStore:
                 workspace_id TEXT NOT NULL REFERENCES workspaces(id),
                 name TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS project_archives (
+                project_id TEXT PRIMARY KEY,
+                archived_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS tickets (
                 id TEXT PRIMARY KEY,
