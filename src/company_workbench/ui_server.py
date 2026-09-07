@@ -149,22 +149,63 @@ class PrototypeHandler(BaseHTTPRequestHandler):
             if not workspaces:
                 ws = engine.create_workspace("Default Workspace")
                 prj = engine.create_project(ws["id"], "AgentOS-Lite")
+                all_projects = [prj]
             else:
-                prjs = engine.list_projects(workspaces[0]["id"])
-                prj = prjs[0] if prjs else engine.create_project(workspaces[0]["id"], "AgentOS-Lite")
-            project_id = prj["id"]
-            goals = engine.list_goals(project_id)
-            tickets = engine.list_tickets(project_id)
-            nodes = engine.list_nodes(project_id)
-            
-            data = {
-                "workspace": workspaces[0] if workspaces else None,
-                "project": prj,
-                "goals": goals,
-                "tickets": tickets,
-                "nodes": nodes,
-                "db_path": str(DB_PATH),
-            }
+                all_projects = []
+                for w in workspaces:
+                    all_projects.extend(engine.list_projects(w["id"]))
+                if not all_projects:
+                    prj = engine.create_project(workspaces[0]["id"], "AgentOS-Lite")
+                    all_projects = [prj]
+
+            prj_map = {p["id"]: p["name"] for p in all_projects}
+            query_params = parse_qs(parsed.query)
+            req_prj_id = query_params.get("project_id", [None])[0]
+
+            if req_prj_id == "all":
+                all_goals = []
+                all_tickets = []
+                all_nodes = []
+                for p in all_projects:
+                    all_goals.extend(engine.list_goals(p["id"]))
+                    tkts = engine.list_tickets(p["id"])
+                    for t in tkts:
+                        t["project_name"] = prj_map.get(t["project_id"], "專案")
+                    all_tickets.extend(tkts)
+                    all_nodes.extend(engine.list_nodes(p["id"]))
+                data = {
+                    "workspace": workspaces[0] if workspaces else None,
+                    "project": {"id": "all", "name": "全部專案 (跨專案總表)"},
+                    "current_project_id": "all",
+                    "all_projects": all_projects,
+                    "goals": all_goals,
+                    "tickets": all_tickets,
+                    "nodes": all_nodes,
+                    "db_path": str(DB_PATH),
+                }
+            else:
+                if req_prj_id:
+                    matched = next((p for p in all_projects if p["id"] == req_prj_id), None)
+                    prj = matched or all_projects[0]
+                else:
+                    prj = all_projects[0]
+                project_id = prj["id"]
+                goals = engine.list_goals(project_id)
+                tickets = engine.list_tickets(project_id)
+                for t in tickets:
+                    t["project_name"] = prj_map.get(t["project_id"], prj["name"])
+                nodes = engine.list_nodes(project_id)
+                
+                data = {
+                    "workspace": workspaces[0] if workspaces else None,
+                    "project": prj,
+                    "current_project_id": project_id,
+                    "all_projects": all_projects,
+                    "goals": goals,
+                    "tickets": tickets,
+                    "nodes": nodes,
+                    "db_path": str(DB_PATH),
+                }
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
@@ -631,6 +672,37 @@ class PrototypeHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
             self.wfile.write(json.dumps(report, ensure_ascii=False).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/project/create":
+            try:
+                body = json.loads(post_body)
+            except Exception:
+                parsed_dict = parse_qs(post_body)
+                body = {k: v[0] for k, v in parsed_dict.items()}
+            name = str(body.get("name", "")).strip()
+            if not name:
+                res = {"status": "error", "message": "專案名稱不可為空"}
+            else:
+                engine = get_engine()
+                workspaces = engine.list_workspaces()
+                ws_id = workspaces[0]["id"] if workspaces else engine.create_workspace("Default Workspace")["id"]
+                prj = engine.create_project(ws_id, name)
+                # Initialize AgentOS mindmap nodes for the new project
+                try:
+                    engine.sync_agentos_mindmap_nodes(prj["id"])
+                except Exception:
+                    pass
+                res = {
+                    "status": "ok",
+                    "project": prj,
+                    "project_id": prj["id"],
+                    "projects": engine.list_projects(ws_id),
+                }
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps(res, ensure_ascii=False).encode("utf-8"))
             return
 
         params = parse_qs(post_body)

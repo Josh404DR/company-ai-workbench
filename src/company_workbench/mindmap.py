@@ -353,6 +353,95 @@ def render_agentos_mindmap_html():
       user-select: none;
     }}
 
+    /* 專案下拉切換選單 (Project Dropdown Switcher) */
+    .project-dropdown-wrapper {{
+      position: relative;
+      display: inline-block;
+    }}
+    .project-switcher-btn {{
+      background: transparent;
+      border: 1px dashed var(--border-bright);
+      color: var(--text-bright);
+      font-size: 11.5px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s;
+    }}
+    .project-switcher-btn:hover {{
+      background: var(--hover-bg);
+      border-color: var(--blue);
+      color: #79c0ff;
+    }}
+    .project-dropdown-menu {{
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      min-width: 230px;
+      background: var(--card-bg);
+      border: 1px solid var(--border-bright);
+      border-radius: 8px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+      z-index: 1000;
+      padding: 6px 0;
+      text-align: left;
+    }}
+    .project-dropdown-menu.show {{
+      display: block;
+    }}
+    .dropdown-header {{
+      font-size: 10px;
+      text-transform: uppercase;
+      font-weight: 800;
+      color: var(--text-muted);
+      padding: 6px 12px;
+      letter-spacing: 0.5px;
+    }}
+    .dropdown-item {{
+      padding: 7px 12px;
+      font-size: 12px;
+      color: var(--text);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.15s;
+    }}
+    .dropdown-item:hover {{
+      background: var(--hover-bg);
+      color: var(--text-bright);
+    }}
+    .dropdown-item.active {{
+      color: #388bfd;
+      font-weight: 700;
+      background: rgba(56, 139, 253, 0.12);
+    }}
+    .dropdown-divider {{
+      height: 1px;
+      background: var(--border);
+      margin: 4px 0;
+    }}
+    .dropdown-action {{
+      padding: 7px 12px;
+      font-size: 11.5px;
+      color: #7ee787;
+      cursor: pointer;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }}
+    .dropdown-action:hover {{
+      background: rgba(63, 185, 80, 0.15);
+      color: #fff;
+    }}
+
     /* 模式切換標籤頁 (View Mode Switcher) */
     .view-mode-tabs {{
       display: flex;
@@ -1192,10 +1281,27 @@ def render_agentos_mindmap_html():
 
     <!-- 五階維度階梯導航 (5-Layer Dimension Breadcrumbs) -->
     <nav class="dimension-ladder" id="dimension-ladder">
-      <div class="ladder-step" data-dim="project" title="專案結構維度">
+      <div class="ladder-step" data-dim="project" title="專案結構維度 (點擊切換專案)">
         <span class="dim-icon">🏢</span>
         <span class="dim-name">專案</span>
-        <span class="dim-val">AgentOS-Lite</span>
+        <div class="project-dropdown-wrapper">
+          <button class="project-switcher-btn" id="project-switcher-btn" onclick="toggleProjectDropdown(event)">
+            <span class="dim-val" id="ladder-project-title">載入中...</span>
+            <span class="arrow-down" style="font-size:9px; opacity:0.8;">▾</span>
+          </button>
+          <div class="project-dropdown-menu" id="project-dropdown-menu">
+            <div class="dropdown-header">切換所屬專案</div>
+            <div class="dropdown-item" id="opt-prj-all" onclick="selectProject('all')">
+              <span>🌐 全部專案 (跨專案總表)</span>
+            </div>
+            <div class="dropdown-divider"></div>
+            <div id="project-list-items"></div>
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-action" onclick="promptCreateProject()">
+              <span>➕ 建立新專案...</span>
+            </div>
+          </div>
+        </div>
       </div>
       <span class="ladder-sep">›</span>
       <div class="ladder-step" data-dim="goal" title="長期目標維度">
@@ -1447,6 +1553,15 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
             </div>
             <!-- 工單清單分頁 -->
             <div class="tab-pane" id="pane-tickets">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; background:rgba(0,0,0,0.28); padding:8px 12px; border-radius:6px; border:1px solid var(--border);">
+                <div style="font-size:12px; font-weight:700; color:var(--text-bright);">
+                  <span id="tickets-view-title">當前專案工單</span> (<span id="tickets-count-badge">0</span>)
+                </div>
+                <div style="display:flex; gap:6px;">
+                  <button class="f-btn active" id="btn-scope-current" onclick="switchTicketsScope('current')">📍 當前專案</button>
+                  <button class="f-btn" id="btn-scope-all" onclick="switchTicketsScope('all')">🌐 跨專案全視角</button>
+                </div>
+              </div>
               <div id="tickets-table-container" style="font-size:12px; color:var(--text);">
                 正在載入本地資料庫工單清冊...
               </div>
@@ -1816,50 +1931,180 @@ diff --git a/tools/contract_linter/rules.js b/tools/contract_linter/rules.js
       }}
     }}
 
-    // 6. 載入資料庫現況 (Load DB State)
-    async function loadDatabaseState() {{
+    let currentProjectId = null;
+    let cachedAllProjects = [];
+    let cachedTickets = [];
+    let ticketsScope = "current";
+
+    // 專案切換下拉選單 (Project Dropdown)
+    function toggleProjectDropdown(e) {{
+      if (e) e.stopPropagation();
+      const menu = document.getElementById("project-dropdown-menu");
+      if (menu) menu.classList.toggle("show");
+    }}
+
+    window.addEventListener("click", function(e) {{
+      const menu = document.getElementById("project-dropdown-menu");
+      if (menu && !e.target.closest(".project-dropdown-wrapper")) {{
+        menu.classList.remove("show");
+      }}
+    }});
+
+    function selectProject(prjId) {{
+      currentProjectId = prjId;
+      const menu = document.getElementById("project-dropdown-menu");
+      if (menu) menu.classList.remove("show");
+
+      if (prjId === "all") {{
+        ticketsScope = "all";
+        const btnCur = document.getElementById("btn-scope-current");
+        const btnAll = document.getElementById("btn-scope-all");
+        if (btnCur && btnAll) {{
+          btnAll.classList.add("active");
+          btnCur.classList.remove("active");
+        }}
+      }}
+
+      appendTerminalLine(`[PROJECT-SWITCH] Switched active project context to: ${{prjId}}`, "term-warn");
+      loadDatabaseState(prjId);
+    }}
+
+    async function promptCreateProject() {{
+      const menu = document.getElementById("project-dropdown-menu");
+      if (menu) menu.classList.remove("show");
+
+      const name = prompt("請輸入新專案名稱 (例如：ai-tool-core / scc-system-control):");
+      if (!name || !name.trim()) return;
+
+      appendTerminalLine(`[PROJECT-CREATE] Creating project: "${{name.trim()}}"...`, "term-info");
       try {{
-        const resp = await fetch("/api/state");
+        const resp = await fetch("/api/project/create", {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify({{ name: name.trim() }})
+        }});
+        const data = await resp.json();
+        if (data.status === "ok") {{
+          appendTerminalLine(`[PROJECT-CREATE] Project created: ${{data.project.name}} (${{data.project.id}})`, "term-success");
+          selectProject(data.project.id);
+        }} else {{
+          appendTerminalLine(`[PROJECT-CREATE-ERROR] ${{data.message}}`, "term-warn");
+        }}
+      }} catch(err) {{
+        appendTerminalLine(`[PROJECT-CREATE-ERROR] ${{err}}`, "term-dim");
+      }}
+    }}
+
+    function switchTicketsScope(scope) {{
+      ticketsScope = scope;
+      const btnCur = document.getElementById("btn-scope-current");
+      const btnAll = document.getElementById("btn-scope-all");
+      if (btnCur && btnAll) {{
+        if (scope === "all") {{
+          btnAll.classList.add("active");
+          btnCur.classList.remove("active");
+        }} else {{
+          btnCur.classList.add("active");
+          btnAll.classList.remove("active");
+        }}
+      }}
+      renderTicketsTable();
+    }}
+
+    function renderTicketsTable() {{
+      const container = document.getElementById("tickets-table-container");
+      if (!container) return;
+
+      const titleEl = document.getElementById("tickets-view-title");
+      const badgeEl = document.getElementById("tickets-count-badge");
+
+      let filteredTickets = cachedTickets;
+      if (ticketsScope === "current" && currentProjectId && currentProjectId !== "all") {{
+        filteredTickets = cachedTickets.filter(t => t.project_id === currentProjectId);
+      }}
+
+      const isAllScope = (ticketsScope === "all" || currentProjectId === "all");
+      if (titleEl) titleEl.textContent = isAllScope ? "跨專案全部工單 (全視角)" : "當前專案工單";
+      if (badgeEl) badgeEl.textContent = filteredTickets.length;
+
+      if (!filteredTickets || filteredTickets.length === 0) {{
+        container.innerHTML = `<div style="color:var(--text-muted); padding:16px; text-align:center;">
+          ${{isAllScope ? "所有專案中目前無工單記錄。" : "此專案目前無工單記錄。可在左側對話框下達「在此開立工單」立案。"}}
+        </div>`;
+        return;
+      }}
+
+      let tableHtml = `
+        <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border); color:var(--text-muted); text-align:left;">
+              <th style="padding:6px;">標號</th>
+              ${{isAllScope ? '<th style="padding:6px;">所屬專案</th>' : ''}}
+              <th style="padding:6px;">標題</th>
+              <th style="padding:6px;">風險</th>
+              <th style="padding:6px;">狀態</th>
+              <th style="padding:6px;">工位</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      filteredTickets.forEach(t => {{
+        const statusColor = t.status === "accepted" ? "#3fb950" : (t.status === "verification" ? "#a371f7" : (t.status === "active" ? "#f0883e" : "#8b99ab"));
+        const prjCol = isAllScope ? `<td style="padding:6px;"><span class="badge" style="background:rgba(56,139,253,0.15); color:#79c0ff; border:1px solid rgba(56,139,253,0.3); font-size:10.5px; padding:2px 6px; border-radius:4px;">🏢 ${{escapeHtml(t.project_name || t.project_id)}}</span></td>` : '';
+        tableHtml += `
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+            <td style="padding:6px; font-weight:700;">#${{t.id}}</td>
+            ${{prjCol}}
+            <td style="padding:6px; color:var(--text-bright); font-weight:500;">${{escapeHtml(t.title)}}</td>
+            <td style="padding:6px; color:#f85149; font-weight:700;">${{t.risk_level.toUpperCase()}}</td>
+            <td style="padding:6px;"><span style="color:${{statusColor}}; font-weight:700;">${{t.status.toUpperCase()}}</span></td>
+            <td style="padding:6px; font-family:monospace; color:#79c0ff;">${{t.node_id || 'task_n4'}}</td>
+          </tr>
+        `;
+      }});
+
+      tableHtml += '</tbody></table>';
+      container.innerHTML = tableHtml;
+    }}
+
+    // 6. 載入資料庫現況 (Load DB State)
+    async function loadDatabaseState(targetProjectId) {{
+      try {{
+        const pId = targetProjectId || currentProjectId || "";
+        const url = pId ? `/api/state?project_id=${{encodeURIComponent(pId)}}` : "/api/state";
+        const resp = await fetch(url);
         const data = await resp.json();
         
-        // 渲染工單清單表格
-        const container = document.getElementById("tickets-table-container");
-        if (!container) return;
-
-        if (!data.tickets || data.tickets.length === 0) {{
-          container.innerHTML = '<div style="color:var(--text-muted);">目前無工單記錄。可在左側直接點擊「在此開立工單」立案。</div>';
-          return;
+        cachedAllProjects = data.all_projects || [];
+        cachedTickets = data.tickets || [];
+        if (!currentProjectId) {{
+          currentProjectId = (data.project && data.project.id) || "all";
         }}
 
-        let tableHtml = `
-          <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
-            <thead>
-              <tr style="border-bottom:1px solid var(--border); color:var(--text-muted); text-align:left;">
-                <th style="padding:6px;">標號</th>
-                <th style="padding:6px;">標題</th>
-                <th style="padding:6px;">風險</th>
-                <th style="padding:6px;">狀態</th>
-                <th style="padding:6px;">工位</th>
-              </tr>
-            </thead>
-            <tbody>
-        `;
+        // 渲染專案切換標題
+        const prjTitle = document.getElementById("ladder-project-title");
+        if (prjTitle) {{
+          prjTitle.textContent = (data.project && data.project.name) || "專案";
+        }}
 
-        data.tickets.forEach(t => {{
-          const statusColor = t.status === "accepted" ? "#3fb950" : (t.status === "verification" ? "#a371f7" : (t.status === "active" ? "#f0883e" : "#8b99ab"));
-          tableHtml += `
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
-              <td style="padding:6px; font-weight:700;">#${{t.id}}</td>
-              <td style="padding:6px; color:var(--text-bright);">${{escapeHtml(t.title)}}</td>
-              <td style="padding:6px; color:#f85149;">${{t.risk_level.toUpperCase()}}</td>
-              <td style="padding:6px;"><span style="color:${{statusColor}}; font-weight:700;">${{t.status.toUpperCase()}}</span></td>
-              <td style="padding:6px; font-family:monospace; color:#79c0ff;">${{t.node_id || 'task_n4'}}</td>
-            </tr>
-          `;
-        }});
+        // 渲染專案下拉選單清單
+        const pContainer = document.getElementById("project-list-items");
+        if (pContainer) {{
+          pContainer.innerHTML = cachedAllProjects.map(p => `
+            <div class="dropdown-item ${{p.id === currentProjectId ? 'active' : ''}}" onclick="selectProject('${{p.id}}')">
+              <span>🏢 ${{escapeHtml(p.name)}}</span>
+              ${{p.id === currentProjectId ? '<span style="color:#388bfd; font-weight:800;">✓</span>' : ''}}
+            </div>
+          `).join("");
+        }}
+        const optAll = document.getElementById("opt-prj-all");
+        if (optAll) {{
+          optAll.classList.toggle("active", currentProjectId === "all");
+        }}
 
-        tableHtml += '</tbody></table>';
-        container.innerHTML = tableHtml;
+        // 渲染工單清單表格
+        renderTicketsTable();
 
       }} catch (err) {{
         console.warn("無法取得 /api/state:", err);

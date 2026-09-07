@@ -192,5 +192,103 @@ class UiServerTestCase(unittest.TestCase):
         self.assertIn("工位精密診斷報告", data["reply"])
 
 
+class ProjectSwitcherTestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        cls.db_path = Path(cls.temp_dir.name) / "workbench.db"
+        ui_server.DB_PATH = cls.db_path
+        cls.engine = WorkbenchEngine(cls.db_path)
+        cls.ws = cls.engine.create_workspace("Switcher WS")
+        cls.prj = cls.engine.create_project(cls.ws["id"], "Switcher Main PRJ")
+
+        cls.server = HTTPServer(("127.0.0.1", 0), ui_server.PrototypeHandler)
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.temp_dir.cleanup()
+        ui_server.DB_PATH = ui_server.get_default_db_path()
+
+    def request(self, method: str, path: str, data: dict | None = None) -> tuple[int, str, dict]:
+        conn = http.client.HTTPConnection("127.0.0.1", self.port)
+        headers = {}
+        body = None
+        if data is not None:
+            body = urlencode(data)
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        conn.request(method, path, body=body, headers=headers)
+        res = conn.getresponse()
+        resp_body = res.read().decode("utf-8")
+        resp_headers = dict(res.getheaders())
+        conn.close()
+        return res.status, resp_body, resp_headers
+
+    def request_json(self, path: str, data: dict) -> tuple[int, dict]:
+        import json
+        conn = http.client.HTTPConnection("127.0.0.1", self.port)
+        body = json.dumps(data)
+        headers = {"Content-Type": "application/json"}
+        conn.request("POST", path, body=body, headers=headers)
+        res = conn.getresponse()
+        resp_data = json.loads(res.read().decode("utf-8"))
+        conn.close()
+        return res.status, resp_data
+
+    def test_project_switcher_and_all_tickets_api(self):
+        # 1. Verify GET / renders project switcher and ticket scope buttons
+        status, body, _ = self.request("GET", "/")
+        self.assertEqual(200, status)
+        self.assertIn("project-dropdown-menu", body)
+        self.assertIn("ladder-project-title", body)
+        self.assertIn("switchTicketsScope('all')", body)
+
+        # 2. Test JSON POST /api/project/create
+        status, data = self.request_json("/api/project/create", {
+            "name": "Switcher Test Project",
+            "workspace_id": self.ws["id"],
+        })
+        self.assertEqual(200, status)
+        self.assertEqual("ok", data.get("status"))
+        new_prj_id = data.get("project_id")
+        self.assertIsNotNone(new_prj_id)
+        self.assertTrue(any(p["id"] == new_prj_id for p in data.get("projects", [])))
+
+        # 3. Create a ticket in the new project
+        self.engine.create_ticket(
+            project_id=new_prj_id,
+            title="Ticket in Project 2",
+            goal="Test ticket in second project",
+            acceptance_criteria=["Done"],
+        )
+
+        # 4. Test GET /api/state?project_id=all
+        status, body, _ = self.request("GET", "/api/state?project_id=all")
+        self.assertEqual(200, status)
+        import json
+        state_all = json.loads(body)
+        self.assertIn("all_projects", state_all)
+        self.assertGreaterEqual(len(state_all["all_projects"]), 2)
+        ticket_titles = [t["title"] for t in state_all.get("tickets", [])]
+        self.assertIn("Ticket in Project 2", ticket_titles)
+        # Verify project_name is attached in cross-project tickets
+        target_t = next(t for t in state_all.get("tickets", []) if t["title"] == "Ticket in Project 2")
+        self.assertEqual("Switcher Test Project", target_t.get("project_name"))
+
+        # 5. Test GET /api/state?project_id=<new_prj_id> (filtered)
+        status, body, _ = self.request("GET", f"/api/state?project_id={new_prj_id}")
+        self.assertEqual(200, status)
+        state_filtered = json.loads(body)
+        self.assertEqual(new_prj_id, state_filtered.get("current_project_id"))
+        self.assertEqual(1, len(state_filtered.get("tickets", [])))
+        self.assertEqual("Ticket in Project 2", state_filtered["tickets"][0]["title"])
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
